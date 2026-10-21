@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../SerialTool/Features/Checksum.cs" Link="Linked/Checksum.cs" />
+    <Compile Include="../SerialTool/Features/HighlightRules.cs" Link="Linked/HighlightRules.cs" />
+    <Compile Include="../SerialTool/Models.cs" Link="Linked/Models.cs" />
+    <Compile Include="../SerialTool/DisplayFormatter.cs" Link="Linked/DisplayFormatter.cs" />
+    <Compile Include="../SerialTool/Features/ModbusRtu.cs" Link="Linked/ModbusRtu.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.IO.Ports" Version="8.0.0" />
+  </ItemGroup>
+</Project>

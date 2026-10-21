@@ -1,0 +1,34 @@
+<Window x:Class="SerialTool.ChecksumCalculatorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="校验计算器" Width="640" Height="480" MinWidth="480" MinHeight="360"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False" ResizeMode="CanResizeWithGrip"
+        FontFamily="Microsoft YaHei UI" FontSize="13"
+        Background="{DynamicResource WindowBgBrush}" Foreground="{DynamicResource TextBrush}">
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*" MinHeight="80"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*" MinHeight="140"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <DockPanel Margin="0,0,0,6">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <CheckBox x:Name="HexChk" Content="HEX 输入" Margin="0,0,12,0" Click="Input_Changed"/>
+                <CheckBox x:Name="EscapeChk" Content="解析转义符" Click="Input_Changed"/>
+            </StackPanel>
+            <TextBlock Text="输入数据（默认为发送区内容）" Style="{StaticResource CardTitle}" Margin="0"/>
+        </DockPanel>
+        <TextBox x:Name="InputBox" Grid.Row="1" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                 FontFamily="{StaticResource MonoFont}" Padding="6,4" TextChanged="InputBox_TextChanged"/>
+        <TextBlock Grid.Row="2" Text="结果（已按各算法的习惯字节序排列，可直接追加到帧尾）" Style="{StaticResource CardTitle}" Margin="0,10,0,6"/>
+        <TextBox x:Name="ResultBox" Grid.Row="3" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                 FontFamily="{StaticResource MonoFont}" Padding="6,4"/>
+        <DockPanel Grid.Row="4" Margin="0,10,0,0">
+            <Button DockPanel.Dock="Right" Content="关闭" Width="84" IsCancel="True" IsDefault="True"/>
+            <Button DockPanel.Dock="Right" Content="复制结果" Width="84" Margin="0,0,8,0" Click="Copy_Click"/>
+            <TextBlock x:Name="InfoText" Style="{StaticResource MutedText}"/>
+        </DockPanel>
+    </Grid>
+</Window>

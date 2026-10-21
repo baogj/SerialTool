@@ -13,6 +13,7 @@ public partial class QuickCommandsWindow : Window
     public QuickCommandsWindow(IEnumerable<QuickCommand> commands)
     {
         InitializeComponent();
+        Features.ThemeManager.Attach(this);
         _items = new ObservableCollection<QuickCommand>(commands.Select(c => c.Clone()));
         CmdGrid.ItemsSource = _items;
     }

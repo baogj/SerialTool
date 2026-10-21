@@ -6,7 +6,12 @@ using System.Text.Json.Serialization;
 namespace SerialTool;
 
 /// <summary>一段收到或发出的原始数据。</summary>
-public sealed record DataChunk(bool IsTx, byte[] Data, DateTime Time);
+public sealed record DataChunk(bool IsTx, byte[] Data, DateTime Time)
+{
+    /// <summary>发送时自动追加的校验字节位置（-1 = 无），用于在文本回显里以 [HEX] 形式显示。</summary>
+    public int MarkStart { get; init; } = -1;
+    public int MarkLength { get; init; }
+}
 
 /// <summary>下拉框选项：显示文本 + 实际值。</summary>
 public sealed class Opt<T>
@@ -97,11 +102,26 @@ public sealed class AppSettings
     public int WaveWindowLength { get; set; } = 1024;
     public string ScriptText { get; set; } = "";
 
+    // v1.2
+    public string Theme { get; set; } = "Light";             // Light / Dark / System
+    public string Checksum { get; set; } = "None";          // ChecksumKind 名称
+    public bool HighlightEnabled { get; set; } // 默认关闭，保持 v1.1 的普通文本视图
+    public bool AutoReplyEnabled { get; set; }
+    public List<SerialTool.Features.HighlightRule> HighlightRules { get; set; } = DefaultHighlightRules();
+
     // 窗口
     public double WindowWidth { get; set; }
     public double WindowHeight { get; set; }
     public bool WindowMaximized { get; set; }
     public double SendPanelHeight { get; set; }
+
+    public static List<SerialTool.Features.HighlightRule> DefaultHighlightRules() => new()
+    {
+        new() { Name = "错误", Pattern = "ERROR", Color = "#F87171", Enabled = true },
+        new() { Name = "信号", Pattern = @"\+CSQ: ?\d+", IsRegex = true, Color = "#FDE047", Enabled = true },
+        new() { Name = "心跳应答示例", Pattern = "PING", Color = "#A78BFA", Enabled = false,
+                ReplyEnabled = true, ReplyContent = "PONG", ReplyDelayMs = 0, CooldownMs = 1000 },
+    };
 
     public static List<QuickCommand> DefaultQuickCommands() => new()
     {

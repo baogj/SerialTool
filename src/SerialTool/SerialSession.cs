@@ -16,7 +16,8 @@ public sealed class SerialSession
 
     private readonly SerialPort _port;
     private readonly ConcurrentQueue<DataChunk> _out;
-    private readonly BlockingCollection<byte[]> _sendQueue = new(new ConcurrentQueue<byte[]>());
+    private readonly BlockingCollection<(byte[] Data, int MarkStart, int MarkLength)> _sendQueue =
+        new(new ConcurrentQueue<(byte[], int, int)>());
     private Thread? _reader;
     private Thread? _writer;
     private volatile bool _stopping;
@@ -51,7 +52,10 @@ public sealed class SerialSession
         _writer.Start();
     }
 
-    public bool Send(byte[] data)
+    public bool Send(byte[] data) => Send(data, -1, 0);
+
+    /// <param name="markStart">校验字节起始位置（仅用于回显标注），-1 表示无</param>
+    public bool Send(byte[] data, int markStart, int markLength)
     {
         if (_stopping || data.Length == 0) return false;
         if (Interlocked.Read(ref _pending) + data.Length > MaxPendingBytes) return false;
@@ -59,7 +63,7 @@ public sealed class SerialSession
         bool ok;
         try
         {
-            ok = _sendQueue.TryAdd(data);
+            ok = _sendQueue.TryAdd((data, markStart, markLength));
         }
         catch (InvalidOperationException)
         {
@@ -106,14 +110,14 @@ public sealed class SerialSession
     {
         try
         {
-            foreach (var data in _sendQueue.GetConsumingEnumerable())
+            foreach (var (data, markStart, markLength) in _sendQueue.GetConsumingEnumerable())
             {
                 Interlocked.Add(ref _pending, -data.Length);
                 if (_stopping) break;
                 try
                 {
                     _port.Write(data, 0, data.Length);
-                    _out.Enqueue(new DataChunk(true, data, DateTime.Now));
+                    _out.Enqueue(new DataChunk(true, data, DateTime.Now) { MarkStart = markStart, MarkLength = markLength });
                 }
                 catch (TimeoutException)
                 {

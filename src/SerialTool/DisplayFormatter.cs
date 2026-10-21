@@ -84,10 +84,34 @@ public sealed class DisplayFormatter
             return;
         }
 
+        if (c.IsTx && c.MarkLength > 0 && c.MarkStart >= 0 && c.MarkStart + c.MarkLength <= c.Data.Length)
+        {
+            // 自动追加的校验字节不当文本解码，而是以 [C5 CD] 形式显示
+            AppendDecoded(c, 0, c.MarkStart, sb, framing);
+            if (framing && _atLineStart) AppendPrefix(sb, c);
+            sb.Append('[');
+            for (int i = 0; i < c.MarkLength; i++)
+            {
+                if (i > 0) sb.Append(' ');
+                byte b = c.Data[c.MarkStart + i];
+                sb.Append(HexDigits[b >> 4]).Append(HexDigits[b & 0xF]);
+            }
+            sb.Append(']');
+            _atLineStart = false;
+            int rest = c.MarkStart + c.MarkLength;
+            AppendDecoded(c, rest, c.Data.Length - rest, sb, framing);
+            return;
+        }
+        AppendDecoded(c, 0, c.Data.Length, sb, framing);
+    }
+
+    private void AppendDecoded(DataChunk c, int offset, int count, StringBuilder sb, bool framing)
+    {
+        if (count <= 0) return;
         Decoder dec = c.IsTx ? _txDecoder : _rxDecoder;
-        int need = dec.GetCharCount(c.Data, 0, c.Data.Length, false);
+        int need = dec.GetCharCount(c.Data, offset, count, false);
         if (_charBuf.Length < need) _charBuf = new char[System.Math.Max(need, _charBuf.Length * 2)];
-        int got = dec.GetChars(c.Data, 0, c.Data.Length, _charBuf, 0, false);
+        int got = dec.GetChars(c.Data, offset, count, _charBuf, 0, false);
 
         for (int i = 0; i < got; i++)
         {

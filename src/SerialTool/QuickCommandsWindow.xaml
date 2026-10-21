@@ -3,19 +3,20 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="编辑快捷指令" Width="700" Height="460" MinWidth="520" MinHeight="320"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False" ResizeMode="CanResizeWithGrip"
-        FontFamily="Microsoft YaHei UI" FontSize="13" Background="#F3F5F8">
+        FontFamily="Microsoft YaHei UI" FontSize="13" Background="{DynamicResource WindowBgBrush}"
+        Foreground="{DynamicResource TextBrush}">
     <Grid Margin="14">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-        <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,8"
-                   Text="双击单元格编辑。名称为空时按钮显示内容；勾选 HEX 后内容按十六进制解析（如 AA 55 01）。发送时会追加左侧“行尾”设置；文本指令支持“解析转义符”。"/>
+        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource TextMutedBrush}" Margin="0,0,0,8"
+                   Text="双击单元格编辑。名称为空时按钮显示内容；勾选 HEX 后内容按十六进制解析（如 AA 55 01）。发送时会追加左侧“校验”和“行尾”设置；文本指令支持“解析转义符”。"/>
         <DataGrid x:Name="CmdGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
                   CanUserSortColumns="False" CanUserReorderColumns="False" SelectionMode="Single" SelectionUnit="FullRow"
-                  HeadersVisibility="Column" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#E5E7EB"
-                  RowHeight="28" Background="White" BorderBrush="#E3E7ED">
+                  HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                  RowHeight="28">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="名称" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="160"/>
                 <DataGridTextColumn Header="内容" Binding="{Binding Content, UpdateSourceTrigger=PropertyChanged}" Width="*"/>

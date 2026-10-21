@@ -72,6 +72,19 @@ public static class SettingsStore
         s.ProtocolMode ??= "普通";
         if (s.WaveWindowLength < 64) s.WaveWindowLength = 1024;
         s.ScriptText ??= "";
+        s.Theme ??= "Light";
+        s.Checksum ??= "None";
+        s.HighlightRules ??= AppSettings.DefaultHighlightRules();
+        s.HighlightRules.RemoveAll(r => r == null);
+        foreach (var r in s.HighlightRules)
+        {
+            r.Name ??= "";
+            r.Pattern ??= "";
+            r.Color ??= "#FDE047";
+            r.ReplyContent ??= "";
+            if (r.ReplyDelayMs < 0) r.ReplyDelayMs = 0;
+            if (r.CooldownMs < 0) r.CooldownMs = 0;
+        }
         return s;
     }
 

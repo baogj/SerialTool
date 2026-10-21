@@ -91,7 +91,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
     private readonly ThroughputMeter _meter = new();
     private readonly WaveformBuffer _waveBuf = new();
     private WaveformElement? _waveElement;
-    private readonly ObservableCollection<ProtocolLine> _protocolLines = new();
+    private ObservableCollection<ProtocolLine> _protocolLines = new();
     private AtLineParser? _atParser;
     private readonly ModbusRtuParser _modbus = new(50);
     private ScriptEngine? _script;
@@ -99,9 +99,19 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
     private const int MaxProtocolLines = 5000;
     private static readonly string[] ProtocolModes = { "普通", "AT", "Modbus RTU" };
     private static readonly int[] WaveWindows = { 256, 512, 1024, 2048, 4096, 8192 };
-    private static readonly Brush ModbusOkBrush = FreezeStatic(Color.FromRgb(0x4A, 0xDE, 0x80));
-    private static readonly Brush ModbusFailBrush = FreezeStatic(Color.FromRgb(0xF8, 0x71, 0x71));
-    private static readonly Brush ModbusMetaBrush = FreezeStatic(Color.FromRgb(0x93, 0xC5, 0xFD));
+    private readonly List<ProtocolLine> _pausedLines = new();   // 协议/高亮视图暂停期间缓存的行
+
+    // ---- v1.2：校验 / 高亮 / 自动回复 / 主题 ----
+    private List<CompiledRule> _compiledRules = new();
+    private List<CompiledRule> _highlightRules = new();   // 当前参与高亮的规则（已启用且有效）
+    private readonly AutoReplyEngine _autoReply = new();
+    private long _autoReplyCount;
+    private bool _lineViewPlain;          // 普通模式下是否改用着色行视图（有高亮规则时）
+    private readonly StringBuilder _openLine = new();
+    private bool _hasOpenItem;            // _protocolLines 最后一项是否为未结束的行
+    private bool _pendingCr;
+    private bool _syncingProtocol;
+    private const int MaxOpenLineChars = 2000;
 
     private static Brush FreezeStatic(Color c)
     {
@@ -112,8 +122,10 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
 
     public MainWindow()
     {
-        InitializeComponent();
         _settings = SettingsStore.Load();
+        ThemeManager.Apply(ThemeManager.Parse(_settings.Theme)); // 先套主题，再创建控件
+        InitializeComponent();
+        ThemeManager.Attach(this);
 
         _uiTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(50) };
         _uiTimer.Tick += (_, _) => FlushQueue();
@@ -194,7 +206,21 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         _waveBuf.WindowLength = (int)(WaveWindowCombo.SelectedItem ?? 1024);
         ScriptBox.Text = s.ScriptText ?? "";
         ProtocolList.ItemsSource = _protocolLines;
+        ProtocolTopCombo.ItemsSource = ProtocolModes;
+        ProtocolTopCombo.SelectedItem = ProtocolCombo.SelectedItem;
+
+        ChecksumCombo.ItemsSource = ChecksumOptions;
+        ChecksumCombo.SelectedItem = ChecksumOptions.FirstOrDefault(o => o.Value.ToString() == s.Checksum) ?? ChecksumOptions[0];
+        ThemeCombo.ItemsSource = ThemeOptions;
+        ThemeCombo.SelectedItem = ThemeOptions.FirstOrDefault(o => o.Value == ThemeManager.Mode) ?? ThemeOptions[0];
+        HighlightChk.IsChecked = s.HighlightEnabled;
+        AutoReplyChk.IsChecked = s.AutoReplyEnabled;
+        AutoReplyBadge.Visibility = s.AutoReplyEnabled ? Visibility.Visible : Visibility.Collapsed;
+        var ver = typeof(MainWindow).Assembly.GetName().Version;
+        AppTitleText.Text = $"SerialTool 串口调试助手  v{ver?.Major}.{ver?.Minor}.{ver?.Build}";
+        RebuildRules();
         ApplyProtocolModeUi();
+        UpdateChecksumPreview();
     }
 
     private void CollectSettings()
@@ -226,6 +252,10 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         s.WaveShowTx = WaveShowTxChk.IsChecked == true;
         if (WaveWindowCombo.SelectedItem is int wlen) s.WaveWindowLength = wlen;
         s.ScriptText = ScriptBox.Text;
+        s.Checksum = CurrentChecksum().ToString();
+        s.Theme = ThemeManager.Mode.ToString();
+        s.HighlightEnabled = HighlightChk.IsChecked == true;
+        s.AutoReplyEnabled = AutoReplyChk.IsChecked == true;
 
         var bounds = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
         if (!bounds.IsEmpty)
@@ -262,6 +292,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         });
         _atParser = new AtLineParser(CurrentEncoding());
         _meter.Reset();
+        InitV12();
         SetStatus("就绪。设置文件：" + SettingsStore.FilePath);
     }
 
@@ -309,7 +340,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
     private void SetStatus(string message, bool error = false)
     {
         StatusText.Text = $"[{DateTime.Now:HH:mm:ss}] {message}";
-        StatusText.Foreground = error ? StatusErrorBrush : StatusNormalBrush;
+        StatusText.SetResourceReference(TextBlock.ForegroundProperty, error ? "StatusErrorBrush" : "StatusFgBrush");
         StatusText.ToolTip = message;
     }
 
@@ -338,6 +369,8 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         _rxTotal = 0;
         _txTotal = 0;
         _meter.Reset();
+        _autoReplyCount = 0;
+        AutoReplyCountText.Text = "";
         UpdateCounters();
         UpdateThroughputUi();
     }
@@ -709,7 +742,9 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
 
     private void AutoScrollChk_Click(object sender, RoutedEventArgs e)
     {
-        if (AutoScrollChk.IsChecked == true) RxBox.ScrollToEnd();
+        if (AutoScrollChk.IsChecked != true) return;
+        RxBox.ScrollToEnd();
+        ScrollLinesToEnd();
     }
 
     private void PauseChk_Click(object sender, RoutedEventArgs e)
@@ -720,21 +755,14 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         {
             string text = _pauseBuffer.ToString();
             _pauseBuffer.Clear();
-            string mode = ProtocolCombo.SelectedItem as string ?? "普通";
-            if (mode == "普通")
-                AppendDisplay(text);
-            else
-            {
-                foreach (var raw in text.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.RemoveEmptyEntries))
-                {
-                    AppendProtocolLine(new ProtocolLine
-                    {
-                        Text = raw,
-                        Kind = AtLineKind.Plain,
-                        Foreground = ModbusMetaBrush,
-                    });
-                }
-            }
+            AppendDisplay(text);
+        }
+        if (!paused && _pausedLines.Count > 0)
+        {
+            var lines = _pausedLines.ToList();
+            _pausedLines.Clear();
+            foreach (var l in lines) AddLineItem(l);
+            ScrollLinesToEnd();
         }
     }
 
@@ -764,13 +792,16 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
                 _waveBuf.Push(c);
                 waveDirty = true;
 
-                // 脚本等待缓冲：文本形式
-                try
+                if (!c.IsTx)
                 {
-                    string t = CurrentEncoding().GetString(c.Data);
-                    _script?.FeedRx(t);
+                    // 脚本 WAITFOR 只看接收数据（v1.1 误把发送回显也算进去）
+                    try { _script?.FeedRx(CurrentEncoding().GetString(c.Data)); }
+                    catch { /* ignore */ }
+
+                    if (AutoReplyChk.IsChecked == true)
+                        foreach (var rule in _autoReply.Push(c.Data, DateTime.Now))
+                            FireAutoReply(rule.Rule);
                 }
-                catch { /* ignore */ }
 
                 if (mode == "普通")
                 {
@@ -780,12 +811,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
                 {
                     if (_atParser == null) _atParser = new AtLineParser(CurrentEncoding());
                     foreach (var line in _atParser.Push(c, CurrentEncoding()))
-                    {
-                        if (PauseChk.IsChecked == true)
-                            _pauseBuffer.Append(line.Text).Append("\r\n");
-                        else
-                            AppendProtocolLine(line);
-                    }
+                        AppendProtocolLine(line);
                 }
                 else if (mode == "Modbus RTU")
                 {
@@ -799,19 +825,15 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
                             IsTx = frame.IsTx,
                             Time = frame.Time,
                             IsError = !frame.CrcOk,
-                            Foreground = frame.CrcOk ? ModbusOkBrush : ModbusFailBrush,
+                            Tone = frame.CrcOk ? LineTone.Ok : LineTone.Err,
                         };
-                        if (PauseChk.IsChecked == true)
-                            _pauseBuffer.Append(line.Text).Append("\r\n");
-                        else
-                            AppendProtocolLine(line);
+                        AppendProtocolLine(line);
                     }
                 }
             }
             if (sb.Length > 0) EmitText(sb.ToString());
             if (waveDirty) _waveElement?.InvalidateVisual();
-            if (mode != "普通" && AutoScrollChk.IsChecked == true && ProtocolList.Items.Count > 0)
-                ProtocolList.ScrollIntoView(ProtocolList.Items[ProtocolList.Items.Count - 1]);
+            ScrollLinesToEnd();
         }
         UpdateCounters();
     }
@@ -834,6 +856,11 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
     private void AppendDisplay(string text)
     {
         if (text.Length == 0) return;
+        if (_lineViewPlain)
+        {
+            AppendPlainToLines(text);
+            return;
+        }
         if (_displayLen + text.Length > MaxDisplayChars)
         {
             // 超过上限：只保留末尾部分，并尽量从整行开始
@@ -860,6 +887,8 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         _pauseBuffer.Clear();
         _formatter.ResetLine();
         _protocolLines.Clear();
+        _pausedLines.Clear();
+        ResetOpenLine();
         _modbus.Reset();
         _atParser = new AtLineParser(CurrentEncoding());
     }
@@ -953,26 +982,46 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
     // 发送
     // ======================================================================
 
-    private bool TryBuildPayload(string content, bool hex, out byte[] data, out string? error)
+    private bool TryBuildPayload(string content, bool hex, out byte[] data, out string? error) =>
+        TryBuildPayload(content, hex, null, null, true, out data, out error);
+
+    private ChecksumKind CurrentChecksum() =>
+        (ChecksumCombo.SelectedItem as Opt<ChecksumKind>)?.Value ?? ChecksumKind.None;
+
+    /// <summary>只解析内容本身（不含校验与行尾），供发送与校验预览共用。</summary>
+    private bool TryBuildBody(string content, bool hex, bool? escape, out byte[] body, out string? error)
     {
         error = null;
-        data = Array.Empty<byte>();
         var enc = CurrentEncoding();
-        byte[] body;
-        if (hex)
+        if (hex) return HexUtil.TryParse(content, out body, out error);
+        body = (escape ?? EscapeChk.IsChecked == true) ? EscapeUtil.Encode(content, enc) : enc.GetBytes(content);
+        return true;
+    }
+
+    /// <summary>内容 → [校验] → [行尾]。checksum 为 null 时使用界面“校验”设置。</summary>
+    private bool TryBuildPayload(string content, bool hex, bool? escape, ChecksumKind? checksum, bool appendLineEnding,
+        out byte[] data, out string? error) =>
+        TryBuildPayload(content, hex, escape, checksum, appendLineEnding, out data, out _, out _, out error);
+
+    private bool TryBuildPayload(string content, bool hex, bool? escape, ChecksumKind? checksum, bool appendLineEnding,
+        out byte[] data, out int markStart, out int markLength, out string? error)
+    {
+        data = Array.Empty<byte>();
+        markStart = -1;
+        markLength = 0;
+        if (!TryBuildBody(content, hex, escape, out byte[] body, out error)) return false;
+        if (body.Length > 0)
         {
-            if (!HexUtil.TryParse(content, out body, out error)) return false;
-        }
-        else if (EscapeChk.IsChecked == true)
-        {
-            body = EscapeUtil.Encode(content, enc);
-        }
-        else
-        {
-            body = enc.GetBytes(content);
+            int plain = body.Length;
+            body = Checksum.Append(checksum ?? CurrentChecksum(), body);
+            if (body.Length > plain)
+            {
+                markStart = plain;
+                markLength = body.Length - plain;
+            }
         }
 
-        string le = (LineEndingCombo.SelectedItem as Opt<string>)?.Value ?? "";
+        string le = appendLineEnding ? (LineEndingCombo.SelectedItem as Opt<string>)?.Value ?? "" : "";
         if (le.Length == 0)
         {
             data = body;
@@ -995,7 +1044,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
             SetStatus("串口未打开", true);
             return false;
         }
-        if (!TryBuildPayload(content, hex, out byte[] data, out string? error))
+        if (!TryBuildPayload(content, hex, null, null, true, out byte[] data, out int ms, out int ml, out string? error))
         {
             SetStatus(error ?? "发送内容无效", true);
             return false;
@@ -1005,7 +1054,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
             SetStatus("发送内容为空", true);
             return false;
         }
-        if (!s.Send(data))
+        if (!s.Send(data, ms, ml))
         {
             SetStatus("发送队列已满或串口正在关闭，本次未发送", true);
             return false;
@@ -1225,10 +1274,10 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
             QuickPanel.Children.Add(new TextBlock
             {
                 Text = "（暂无，点击右侧“编辑快捷指令”添加）",
-                Foreground = (Brush)FindResource("TextMutedBrush"),
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(0, 4, 0, 0),
             });
+            ((TextBlock)QuickPanel.Children[0]).SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
             return;
         }
         foreach (var cmd in cmds)

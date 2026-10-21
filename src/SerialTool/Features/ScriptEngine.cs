@@ -10,8 +10,10 @@ namespace SerialTool.Features;
 
 /// <summary>
 /// 轻量脚本语言（无第三方依赖，适合单文件发布）：
-///   SEND text          文本发送（支持 \r \n \t \0 \\ \xHH）
-///   SENDHEX aa bb cc   HEX 发送
+///   SEND text          文本发送（支持 \r \n \t \0 \\ \xHH），追加校验 + 行尾
+///   SENDHEX aa bb cc   HEX 发送，追加校验（不加行尾）
+///   SENDHEXRAW aa bb   HEX 原样发送（不加校验）
+///   CHECKSUM MODBUS    本脚本内的校验覆盖：NONE / MODBUS / XMODEM / CCITT / SUM / XOR / DEFAULT（跟随界面）
 ///   SLEEP ms
 ///   WAITFOR pattern timeout_ms   等待 RX 文本包含 pattern（字面量）
 ///   WAITREGEX pattern timeout_ms 正则等待
@@ -24,8 +26,10 @@ public sealed class ScriptEngine
     {
         bool IsPortOpen { get; }
         string? PortName { get; }
-        bool SendText(string text, bool escape);
-        bool SendHex(string hex, out string? error);
+        /// <param name="checksum">null = 跟随界面“校验”设置</param>
+        bool SendText(string text, bool escape, ChecksumKind? checksum, out string? error);
+        /// <param name="raw">true = 不追加校验</param>
+        bool SendHex(string hex, ChecksumKind? checksum, bool raw, out string? error);
         void Log(string message);
         Encoding Encoding { get; }
     }
@@ -100,6 +104,7 @@ public sealed class ScriptEngine
     {
         var lines = script.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
         int i = 0;
+        ChecksumKind? checksum = null; // 脚本内覆盖
         try
         {
             Emit($"--- 脚本开始（{lines.Length} 行）---");
@@ -129,14 +134,34 @@ public sealed class ScriptEngine
                     case "SEND":
                         if (!_host.IsPortOpen) throw new Exception("串口未打开");
                         Emit("SEND " + Visible(arg));
-                        if (!_host.SendText(arg, true))
-                            throw new Exception("发送失败");
+                        if (!_host.SendText(arg, true, checksum, out string? terr))
+                            throw new Exception(terr ?? "发送失败");
                         break;
                     case "SENDHEX":
-                        if (!_host.IsPortOpen) throw new Exception("串口未打开");
-                        Emit("SENDHEX " + arg);
-                        if (!_host.SendHex(arg, out string? err))
-                            throw new Exception(err ?? "HEX 发送失败");
+                    case "SENDHEXRAW":
+                        {
+                            if (!_host.IsPortOpen) throw new Exception("串口未打开");
+                            bool rawHex = cmd == "SENDHEXRAW";
+                            Emit(cmd + " " + arg);
+                            if (!_host.SendHex(arg, checksum, rawHex, out string? err))
+                                throw new Exception(err ?? "HEX 发送失败");
+                            break;
+                        }
+                    case "CHECKSUM":
+                        if (arg.Equals("DEFAULT", StringComparison.OrdinalIgnoreCase) || arg.Length == 0)
+                        {
+                            checksum = null;
+                            Emit("CHECKSUM → 跟随界面设置");
+                        }
+                        else if (Checksum.TryParseShortName(arg, out var ck))
+                        {
+                            checksum = ck;
+                            Emit("CHECKSUM → " + Checksum.DisplayName(ck));
+                        }
+                        else
+                        {
+                            throw new Exception($"未知校验：{arg}（可用 NONE/MODBUS/XMODEM/CCITT/SUM/XOR/DEFAULT）");
+                        }
                         break;
                     case "WAITFOR":
                         {
@@ -238,12 +263,15 @@ LOG AT 轮询完成
 ";
 
     public static string SampleModbusRead =>
-@"# Modbus RTU 读保持寄存器：从站1，起始0，数量1
-# 帧：01 03 00 00 00 01 84 0A
+@"# Modbus RTU 读保持寄存器：从站1，起始地址0，数量10
+# CHECKSUM MODBUS 让 SENDHEX 自动追加 CRC（01 03 00 00 00 0A → C5 CD）
 STATUS
+CHECKSUM MODBUS
 CLEARRX
-SENDHEX 01 03 00 00 00 01 84 0A
+SENDHEX 01 03 00 00 00 0A
 SLEEP 500
-LOG 已发送读保持寄存器请求（请在 Modbus 模式下查看帧解析）
+# 不加校验的原样发送：
+# SENDHEXRAW 01 03 00 00 00 01 84 0A
+LOG 已发送读保持寄存器请求（在「协议：Modbus RTU」下查看帧解析）
 ";
 }

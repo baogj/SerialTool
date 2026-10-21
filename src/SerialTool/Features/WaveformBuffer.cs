@@ -73,11 +73,22 @@ public sealed class WaveformElement : FrameworkElement
     private readonly byte[] _scratchRx = new byte[8192];
     private readonly byte[] _scratchTx = new byte[8192];
 
-    private static readonly Pen RxPen = FreezePen(Color.FromRgb(0x60, 0xA5, 0xFA), 1.2);
-    private static readonly Pen TxPen = FreezePen(Color.FromRgb(0x4A, 0xDE, 0x80), 1.0);
-    private static readonly Pen GridPen = FreezePen(Color.FromRgb(0x37, 0x41, 0x51), 0.8);
-    private static readonly Pen AxisPen = FreezePen(Color.FromRgb(0x6B, 0x72, 0x80), 1.0);
     private static readonly Typeface LabelFace = new("Consolas");
+    private int _penVersion = -1;
+    private Pen _rxPen = null!, _txPen = null!, _gridPen = null!, _axisPen = null!;
+    private Brush _bg = null!, _textBrush = null!;
+
+    private void EnsurePens()
+    {
+        if (_penVersion == ThemeManager.Version) return;
+        _penVersion = ThemeManager.Version;
+        _rxPen = FreezePen(ThemeManager.GetColor("WaveRx"), 1.2);
+        _txPen = FreezePen(ThemeManager.GetColor("WaveTx"), 1.0);
+        _gridPen = FreezePen(ThemeManager.GetColor("WaveGrid"), 0.8);
+        _axisPen = FreezePen(ThemeManager.GetColor("WaveAxis"), 1.0);
+        _bg = ThemeManager.Get("WaveBg");
+        _textBrush = ThemeManager.Get("WaveText");
+    }
 
     public WaveformElement(WaveformBuffer buffer)
     {
@@ -97,29 +108,30 @@ public sealed class WaveformElement : FrameworkElement
         double w = ActualWidth;
         double h = ActualHeight;
         if (w < 10 || h < 10) return;
+        EnsurePens();
 
-        dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(0x11, 0x18, 0x27)), null, new Rect(0, 0, w, h));
+        dc.DrawRectangle(_bg, null, new Rect(0, 0, w, h));
 
         for (int v = 0; v <= 255; v += 64)
         {
             double y = h - 1 - (v / 255.0) * (h - 2);
-            dc.DrawLine(v == 0 || v == 128 || v == 255 ? AxisPen : GridPen, new Point(0, y), new Point(w, y));
+            dc.DrawLine(v == 0 || v == 128 || v == 255 ? _axisPen : _gridPen, new Point(0, y), new Point(w, y));
         }
 
         int rxN = _buf.CopyRx(_scratchRx);
-        if (rxN > 1) DrawSeries(dc, _scratchRx.AsSpan(0, rxN), w, h, RxPen);
+        if (rxN > 1) DrawSeries(dc, _scratchRx.AsSpan(0, rxN), w, h, _rxPen);
 
         if (_buf.ShowTx)
         {
             int txN = _buf.CopyTx(_scratchTx);
-            if (txN > 1) DrawSeries(dc, _scratchTx.AsSpan(0, txN), w, h, TxPen);
+            if (txN > 1) DrawSeries(dc, _scratchTx.AsSpan(0, txN), w, h, _txPen);
         }
 
         var ft = new FormattedText(
-            $"RX窗口={_buf.RxCount}/{_buf.WindowLength}" + (_buf.ShowTx ? $"  TX={_buf.TxCount}" : "") + (_buf.Paused ? "  [暂停]" : "") + "  蓝=RX 绿=TX",
+            $"RX窗口={_buf.RxCount}/{_buf.WindowLength}" + (_buf.ShowTx ? $"  TX={_buf.TxCount}" : "") + (_buf.Paused ? "  [暂停]" : "") + "  蓝=RX 绿=TX  Y=字节值 0..255",
             System.Globalization.CultureInfo.CurrentUICulture,
             FlowDirection.LeftToRight,
-            LabelFace, 11, Brushes.LightGray,
+            LabelFace, 11, _textBrush,
             VisualTreeHelper.GetDpi(this).PixelsPerDip);
         dc.DrawText(ft, new Point(6, 4));
     }
