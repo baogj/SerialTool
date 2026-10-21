@@ -9,6 +9,15 @@ using System.Runtime.InteropServices;
 using SerialTool;
 using SerialTool.Features;
 
+if (args.Length == 2 && args[0] == "--dump-samples")
+{
+    System.IO.Directory.CreateDirectory(args[1]);
+    TestSuite.Sample().Save(System.IO.Path.Combine(args[1], "示例测试用例.json"));
+    foreach (var (n, code) in new[] { ("at_test.lua", LuaSamples.AtTest), ("modbus_poll.lua", LuaSamples.ModbusPoll), ("echo_on_receive.lua", LuaSamples.Echo) })
+        System.IO.File.WriteAllText(System.IO.Path.Combine(args[1], n), code, new UTF8Encoding(false));
+    Console.WriteLine("samples written");
+    return 0;
+}
 int pass = 0, fail = 0;
 void Check(string name, string expected, string actual)
 {
@@ -733,6 +742,326 @@ finally
     CheckTrue("baud: no good rate -> null", BaudScorer.Best(results.Where(r => r.Baud != 115200)) == null);
 }
 
+
+// =====================================================================
+// v1.5：多会话标签页 —— 设置迁移与会话隔离
+// =====================================================================
+{
+    Console.WriteLine("\n== v1.5 会话 ==");
+    var legacyJson = "{\"ConnType\":\"TcpClient\",\"PortName\":\"COM7\",\"BaudRate\":9600,\"RemoteHost\":\"10.0.0.5\",\"RemotePort\":4001,\"HexSend\":true,\"Checksum\":\"ModbusCrc16\",\"SendText\":\"01 03 00 00 00 01\",\"ScriptText\":\"send AT\"}";
+    var legacy = System.Text.Json.JsonSerializer.Deserialize<AppSettings>(legacyJson)!;
+    legacy.Sessions = null!;
+    bool mig = AppSettings.MigrateSessions(legacy);
+    CheckTrue("migrate v1.4 -> 1 session", mig && legacy.Sessions.Count == 1);
+    var ms0 = legacy.Sessions[0];
+    CheckTrue("migrated tab 1 keeps connection", ms0.Name == "会话 1" && ms0.ConnType == "TcpClient" && ms0.PortName == "COM7" && ms0.BaudRate == 9600 && ms0.RemoteHost == "10.0.0.5" && ms0.RemotePort == 4001);
+    CheckTrue("migrated tab 1 keeps send area", ms0.HexSend && ms0.Checksum == "ModbusCrc16" && ms0.SendText == "01 03 00 00 00 01" && ms0.ScriptText == "send AT");
+    CheckTrue("migrate is idempotent", !AppSettings.MigrateSessions(legacy) && legacy.Sessions.Count == 1);
+    legacy.Sessions.Add(new SessionSettings { Id = ms0.Id, Name = "" });
+    legacy.ActiveSessionIndex = 9;
+    AppSettings.MigrateSessions(legacy);
+    CheckTrue("duplicate id fixed, empty name filled, index clamped", legacy.Sessions[1].Id != ms0.Id && legacy.Sessions[1].Name == "会话 2" && legacy.ActiveSessionIndex == 0);
+    var rt = System.Text.Json.JsonSerializer.Deserialize<AppSettings>(System.Text.Json.JsonSerializer.Serialize(legacy))!;
+    CheckTrue("session list round-trips JSON", rt.Sessions.Count == 2 && rt.Sessions[0].RemotePort == 4001 && rt.Sessions[1].Id == legacy.Sessions[1].Id);
+
+    // 两个会话：一个 TCP 服务器、一个 TCP 客户端，各自的设置 / 缓冲 / 计数器互不影响
+    var sa = new SessionCore(new SessionSettings { Name = "A", ConnType = "TcpServer", LocalPort = 0, LineEnding = "\r\n" });
+    var connA = TcpServerConnection.Listen(0, sa.Output);
+    sa.Attach(connA);
+    var sb2 = new SessionCore(new SessionSettings { Name = "B", ConnType = "TcpClient", RemoteHost = "127.0.0.1", RemotePort = connA.LocalPort, HexSend = true, Checksum = "ModbusCrc16" });
+    await sb2.OpenAsync();
+    CheckTrue("session B connected", sb2.IsOpen && await WaitFor(() => connA.Clients.Count == 1));
+    var rxA = new RxCollector(sa.Channel);
+    var rxB = new RxCollector(sb2.Channel);
+    CheckTrue("session A sends text + its line ending", sa.Send("hello", false, out _));
+    CheckTrue("B receives A's text", await WaitFor(() => Encoding.ASCII.GetString(rxB.Snapshot()) == "hello\r\n"));
+    CheckTrue("session B sends hex + its CRC", sb2.Send("01 03 00 00 00 01", true, out _));
+    CheckTrue("A receives B's frame with CRC", await WaitFor(() => Hx(rxA.Snapshot()) == "01 03 00 00 00 01 84 0A"));
+    CheckTrue("settings independent", sa.Settings.LineEnding == "\r\n" && sb2.Settings.LineEnding == "" && !sa.Settings.HexSend && sb2.Settings.HexSend);
+    CheckTrue("counters independent", sa.TxBytes == 7 && sa.RxBytes == 8 && sb2.TxBytes == 8 && sb2.RxBytes == 7);
+    CheckTrue("output queues independent", sa.Output.Where(c => !c.IsTx).Sum(c => c.Data.Length) == 8 && sb2.Output.Where(c => !c.IsTx).Sum(c => c.Data.Length) == 7);
+    rxA.Clear();
+    CheckTrue("clearing A's buffer leaves B's", rxA.Count == 0 && rxB.Count == 7);
+    CheckTrue("channel names", sa.Channel.Name == "A" && sb2.Channel.ToString() == "B");
+    await sb2.CloseAsync();
+    CheckTrue("B closed, A still open", !sb2.IsOpen && sa.IsOpen && !sb2.Channel.IsOpen && sa.Channel.IsOpen);
+    CheckTrue("closed session send fails", !sb2.Send("x", false, out var sbErr) && sbErr != null);
+    rxA.Dispose(); rxB.Dispose();
+    await sa.CloseAsync();
+}
+
+// =====================================================================
+// v1.5：批量测试
+// =====================================================================
+{
+    Console.WriteLine("\n== v1.5 批量测试 ==");
+    var dev = new FakeChannel("模拟设备");
+    int atCount = 0;
+    var mdl15 = new ModbusDataModel(10); mdl15.Holding[0] = 0x0102; mdl15.Holding[1] = 0x0304;
+    var slave15 = new ModbusSlave(mdl15) { SlaveId = 1 };
+    dev.Responder = d =>
+    {
+        var t = Encoding.ASCII.GetString(d);
+        if (t == "AT\r\n") return A("\r\nOK\r\n");
+        if (t == "AT+FLAKY\r\n") return ++atCount >= 3 ? A("OK\r\n") : A("ERROR\r\n");
+        if (t == "AT+VER\r\n") return A("+VER: 1.5.0\r\n");
+        if (t == "AT+SILENT\r\n") return null;
+        if (d.Length > 0 && d[0] == 1) return slave15.Push(d, DateTime.Now).Select(x => x.Response).FirstOrDefault(x => x != null);
+        if (d.Length > 0 && d[0] == 2) return H("02 83 02 C0 F1");
+        return null;
+    };
+    var suite = new TestSuite
+    {
+        Name = "单元测试",
+        Steps =
+        {
+            new TestStep { Name = "AT", Send = "AT\\r\\n", Expect = ExpectMode.Contains, ExpectValue = "OK" },
+            new TestStep { Name = "版本", Send = "AT+VER\\r\\n", Expect = ExpectMode.Regex, ExpectValue = @"\d+\.\d+\.\d+" },
+            new TestStep { Name = "不稳定", Send = "AT+FLAKY\\r\\n", Expect = ExpectMode.Contains, ExpectValue = "OK", Retries = 3, TimeoutMs = 150 },
+            new TestStep { Name = "无应答", Send = "AT+SILENT\\r\\n", Expect = ExpectMode.Contains, ExpectValue = "OK", TimeoutMs = 200 },
+            new TestStep { Name = "读寄存器", Send = "01 03 00 00 00 02", SendHex = true, Checksum = "ModbusCrc16", Expect = ExpectMode.ModbusValid, TimeoutMs = 500 },
+            new TestStep { Name = "精确", Send = "01 06 00 01 12 34", SendHex = true, Checksum = "ModbusCrc16", Expect = ExpectMode.ExactHex, ExpectValue = "01 06 00 01 12 34 ?? ??" },
+            new TestStep { Name = "异常应答", Send = "02 03 00 00 00 01", SendHex = true, Checksum = "ModbusCrc16", Expect = ExpectMode.ModbusValid, TimeoutMs = 300 },
+            new TestStep { Name = "禁用", Enabled = false, Send = "AT\\r\\n" },
+            new TestStep { Name = "只发", Send = "AT\\r\\n", Expect = ExpectMode.None },
+        },
+    };
+    var runner = new TestRunner(dev);
+    var started = new List<int>();
+    var finished = new List<TestStepResult>();
+    runner.StepStarted += (l, i) => started.Add(i);
+    runner.StepFinished += r => finished.Add(r);
+    var sw15 = System.Diagnostics.Stopwatch.StartNew();
+    var rep = await runner.RunAsync(suite, 2, CancellationToken.None);
+    sw15.Stop();
+    var tr1 = rep.Results.Where(r => r.Loop == 1).ToList();
+    CheckTrue("runner ran 2 loops x 9 steps", rep.Results.Count == 18 && started.Count == 18 && finished.Count == 18);
+    CheckTrue("contains -> pass", tr1[0].Verdict == TestVerdict.Pass);
+    CheckTrue("regex -> pass", tr1[1].Verdict == TestVerdict.Pass && tr1[1].Message.Contains("1.5.0"));
+    CheckTrue("retries -> pass on 3rd attempt", tr1[2].Verdict == TestVerdict.Pass && tr1[2].Attempts == 3);
+    CheckTrue("timeout -> fail", tr1[3].Verdict == TestVerdict.Fail && tr1[3].Message.Contains("超时") && tr1[3].DurationMs >= 180);
+    CheckTrue("modbus valid -> pass", tr1[4].Verdict == TestVerdict.Pass && tr1[4].ReceivedHex.StartsWith("01 03 04 01 02 03 04"));
+    CheckTrue("exact hex with wildcard -> pass", tr1[5].Verdict == TestVerdict.Pass);
+    CheckTrue("modbus exception -> fail", tr1[6].Verdict == TestVerdict.Fail && tr1[6].Message.Contains("异常"));
+    CheckTrue("disabled -> skipped", tr1[7].Verdict == TestVerdict.Skipped);
+    CheckTrue("expect none -> pass", tr1[8].Verdict == TestVerdict.Pass);
+    CheckTrue("sent hex recorded with CRC", tr1[4].SentHex == "01 03 00 00 00 02 C4 0B");
+    Check("report counts (2 fails x 2 loops)", "12/4/2", $"{rep.Passed}/{rep.Failed}/{rep.Skipped}");
+    Check("pass rate", "75.0", rep.PassRate.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture));
+    var csv15 = rep.ToCsv();
+    CheckTrue("CSV header + rows + summary", csv15.StartsWith("循环,步骤,名称,开始时间,耗时(ms),发送HEX") && csv15.Split('\n').Count(l => l.StartsWith("1,") || l.StartsWith("2,")) == 18 && csv15.Contains("通过率,75.0%"));
+    CheckTrue("CSV escapes quotes/commas", csv15.Contains("\"+VER: 1.5.0\\r\\n\"") || csv15.Contains("+VER: 1.5.0\\r\\n"));
+    var html = rep.ToHtml();
+    CheckTrue("HTML report has rows colored + rate", html.Contains("<html") && html.Contains("class=\"pass\"") && html.Contains("class=\"fail\"") && html.Contains("75.0%") && html.Contains("单元测试"));
+    CheckTrue("HTML encodes content", !html.Contains("<b>+VER") && TestSuite.Sample().Steps.Count >= 4);
+
+    // 失败即中止
+    var stopSuite = new TestSuite { Steps = { new TestStep { Send = "AT+SILENT\\r\\n", ExpectValue = "OK", TimeoutMs = 100, ContinueOnFail = false }, new TestStep { Send = "AT\\r\\n", ExpectValue = "OK" } } };
+    var rep2 = new TestRunner(dev).Run(stopSuite, 3, CancellationToken.None);
+    CheckTrue("continue-on-fail=false aborts run", rep2.Aborted && rep2.Results.Count == 1);
+    // 取消
+    var cts15 = new CancellationTokenSource(150);
+    var rep3 = new TestRunner(dev).Run(new TestSuite { Steps = { new TestStep { Send = "AT+SILENT\\r\\n", ExpectValue = "OK", TimeoutMs = 5000 } } }, 1, cts15.Token);
+    CheckTrue("cancel stops a waiting step", rep3.Cancelled);
+    // 未连接
+    var closed = new FakeChannel("断开") { Open = false };
+    var rep4 = new TestRunner(closed).Run(new TestSuite { Steps = { new TestStep { Send = "AT", ExpectValue = "OK" } } }, 1, CancellationToken.None);
+    CheckTrue("closed session -> error verdict", rep4.Results[0].Verdict == TestVerdict.Error && rep4.Results[0].Message.Contains("未连接"));
+    // JSON
+    var js = TestSuite.Sample().ToJson();
+    var back = TestSuite.FromJson(js);
+    CheckTrue("suite JSON round trip (enum as string)", js.Contains("\"ModbusValid\"") && back.Steps.Count == TestSuite.Sample().Steps.Count && back.Steps[3].Expect == ExpectMode.ModbusValid && back.Steps[3].Checksum == "ModbusCrc16");
+    CheckTrue("wildcard hex parser", TestRunner.TryParseWildHex("01 ?? xx 0A", out var wh) && wh.Length == 4 && wh[1] == null && wh[2] == null && wh[3] == 0x0A && !TestRunner.TryParseWildHex("0G", out _));
+    CheckTrue("exact hex mismatch fails fast", TestRunner.Evaluate(new TestStep { Expect = ExpectMode.ExactHex }, null, new byte?[] { 1, 2 }, Array.Empty<byte>(), H("01 03"), Encoding.ASCII, false).Item1 == TestRunner.EvalState.Fail);
+}
+
+// =====================================================================
+// v1.5：Modbus 网关
+// =====================================================================
+{
+    Console.WriteLine("\n== v1.5 Modbus 网关 ==");
+    var mbap = H("00 07 00 00 00 06 11 03 00 6B 00 03");
+    var rtu15 = ModbusGatewayCodec.MbapToRtu(mbap);
+    Check("MBAP -> RTU + CRC", "11 03 00 6B 00 03 76 87", Hx(rtu15));
+    Check("MBAP -> RTU unit override", "05 03 00 6B 00 03", Hx(ModbusGatewayCodec.MbapToRtu(mbap, 5)).Substring(0, 17));
+    CheckTrue("RTU -> PDU (CRC ok)", ModbusGatewayCodec.TryRtuToPdu(ModbusGatewayCodec.BuildRtu(1, H("03 02 BE EF")), out var u15, out var pdu15) && u15 == 1 && Hx(pdu15) == "03 02 BE EF");
+    CheckTrue("RTU bad CRC rejected", !ModbusGatewayCodec.TryRtuToPdu(H("01 03 02 BE EF 00 00"), out _, out _));
+    Check("build MBAP keeps tid", "AB CD 00 00 00 05 11 03 02 00 01", Hx(ModbusGatewayCodec.BuildMbap(0xABCD, 0x11, H("03 02 00 01"))));
+    CheckTrue("parse MBAP complete/partial/bad", ModbusGatewayCodec.TryParseMbap(mbap, out int mfl) == 1 && mfl == 12 && ModbusGatewayCodec.TryParseMbap(mbap.Take(9).ToArray(), out _) == 0 && ModbusGatewayCodec.TryParseMbap(H("00 01 00 05 00 06 01 03 00 00"), out _) == -1);
+    CheckTrue("RTU response length", ModbusGatewayCodec.RtuResponseLength(H("01 03 04")) == 9 && ModbusGatewayCodec.RtuResponseLength(H("01 83")) == 5 && ModbusGatewayCodec.RtuResponseLength(H("01 10")) == 8 && ModbusGatewayCodec.RtuResponseLength(H("01")) == 0);
+    CheckTrue("RTU request length", ModbusGatewayCodec.RtuRequestLength(H("01 03")) == 8 && ModbusGatewayCodec.RtuRequestLength(H("01 10 00 00 00 02 04")) == 13 && ModbusGatewayCodec.RtuRequestLength(H("01 10 00")) == 0);
+
+    // 网关 + 模拟 RTU 从站（v1.4 ModbusSlave）
+    var gm = new ModbusDataModel(200); gm.Holding[0x6B] = 0x022B; gm.Holding[0x6C] = 0x0000; gm.Holding[0x6D] = 0x0064;
+    var gslave = new ModbusSlave(gm) { SlaveId = 0x11 };
+    var bus = new FakeChannel("RTU 总线") { DelayMs = 5 };
+    bool busSilent = false;
+    bus.Responder = d => busSilent ? null : gslave.Push(d, DateTime.Now).Select(x => x.Response).FirstOrDefault(x => x != null);
+    using var transport = new ChannelRtuTransport(bus);
+    await using var gw = new ModbusTcpToRtuGateway(transport) { TimeoutMs = 300 };
+    var glog = new ConcurrentQueue<GatewayLogEntry>();
+    gw.Log += e => glog.Enqueue(e);
+    var direct = await gw.ProcessAsync(mbap);
+    Check("gateway direct process", "00 07 00 00 00 09 11 03 06 02 2B 00 00 00 64", Hx(direct!));
+    busSilent = true;
+    var tmo = await gw.ProcessAsync(H("12 34 00 00 00 06 11 03 00 00 00 01"));
+    Check("gateway timeout -> exception 0B, tid kept", "12 34 00 00 00 03 11 83 0B", Hx(tmo!));
+    busSilent = false;
+    CheckTrue("gateway stats + log", gw.Stats.Requests == 2 && gw.Stats.Responses == 1 && gw.Stats.Timeouts == 1 && glog.Count == 2 && glog.Any(e => e.IsError && e.Result.Contains("0B")));
+
+    gw.Start(0, System.Net.IPAddress.Loopback);
+    CheckTrue("gateway listening", gw.IsRunning && gw.Port > 0);
+    // 两个 TCP 客户端并发请求：事务号各自对应，总线串行
+    async Task<byte[]> MbClient(ushort tidBase, int n, ushort reg)
+    {
+        using var tc = new System.Net.Sockets.TcpClient();
+        await tc.ConnectAsync(System.Net.IPAddress.Loopback, gw.Port);
+        var ns = tc.GetStream();
+        var all = new List<byte>();
+        for (int i = 0; i < n; i++)
+        {
+            ushort tid = (ushort)(tidBase + i);
+            var req = ModbusGatewayCodec.BuildMbap(tid, 0x11, new byte[] { 3, (byte)(reg >> 8), (byte)reg, 0, 1 });
+            await ns.WriteAsync(req);
+            var buf = new byte[11];
+            int got = 0;
+            using var rc = new CancellationTokenSource(3000);
+            while (got < 6 || got < 6 + ((buf[4] << 8) | buf[5])) { int k = await ns.ReadAsync(buf.AsMemory(got, (got < 6 ? 6 : 6 + ((buf[4] << 8) | buf[5])) - got), rc.Token); if (k <= 0) break; got += k; }
+            all.AddRange(buf.Take(got));
+        }
+        return all.ToArray();
+    }
+    var ta = MbClient(0x1000, 5, 0x6B);
+    var tb = MbClient(0x2000, 5, 0x6D);
+    await Task.WhenAll(ta, tb);
+    bool tidsOk = true;
+    for (int i = 0; i < 5; i++)
+    {
+        var fa = ta.Result.Skip(i * 11).Take(11).ToArray();
+        var fb = tb.Result.Skip(i * 11).Take(11).ToArray();
+        tidsOk &= ModbusGatewayCodec.TransactionId(fa) == 0x1000 + i && Hx(fa.Skip(6).ToArray()) == "11 03 02 02 2B";
+        tidsOk &= ModbusGatewayCodec.TransactionId(fb) == 0x2000 + i && Hx(fb.Skip(6).ToArray()) == "11 03 02 00 64";
+    }
+    CheckTrue("TCP loopback via gateway -> fake RTU slave, tid mapping (2 clients x 5)", tidsOk);
+    CheckTrue("bus saw serialized RTU frames", bus.Sent.Count == 12 && bus.MaxConcurrent == 1);
+    busSilent = true;
+    var tt = await MbClient(0x3000, 1, 0x6B);
+    Check("TCP loopback timeout -> 0B", "30 00 00 00 00 03 11 83 0B", Hx(tt.Take(9).ToArray()));
+    busSilent = false;
+    await gw.StopAsync();
+    CheckTrue("gateway stopped", !gw.IsRunning);
+
+    // 反向：串口 RTU 主站 → 远端 Modbus TCP 从站
+    var rm = new ModbusDataModel(20); rm.Holding[2] = 0x1234;
+    var tslave = new ModbusSlave(rm) { SlaveId = 1, Framing = ModbusFraming.Tcp };
+    var remote = TcpServerConnection.Listen(0, null);
+    bool remoteSilent = false;
+    remote.Received += d => { if (remoteSilent) return; foreach (var (resp, _) in tslave.Push(d, DateTime.Now)) if (resp != null) remote.Send(resp); };
+    remote.Start();
+    var serialSide = new FakeChannel("串口");
+    var serialRx = new List<byte>();
+    serialSide.SentHook = d => { lock (serialRx) serialRx.AddRange(d); };
+    await using var rgw = new ModbusRtuToTcpGateway(serialSide, "127.0.0.1", remote.LocalPort) { TimeoutMs = 300 };
+    rgw.Start();
+    var req1 = ModbusGatewayCodec.BuildRtu(1, H("03 00 02 00 01"));
+    serialSide.Inject(req1.Take(3).ToArray());
+    await Task.Delay(20);
+    serialSide.Inject(req1.Skip(3).ToArray());
+    CheckTrue("reverse: RTU master gets RTU reply", await WaitFor(() => { lock (serialRx) return serialRx.Count >= 7; }));
+    lock (serialRx) { Check("reverse: reply with CRC", Hx(ModbusGatewayCodec.BuildRtu(1, H("03 02 12 34"))), Hx(serialRx.ToArray())); serialRx.Clear(); }
+    remoteSilent = true;
+    serialSide.Inject(ModbusGatewayCodec.BuildRtu(1, H("03 00 02 00 01")));
+    CheckTrue("reverse: timeout reply arrives", await WaitFor(() => { lock (serialRx) return serialRx.Count >= 5; }));
+    lock (serialRx) { Check("reverse: timeout -> RTU exception 0B", Hx(ModbusGatewayCodec.BuildRtu(1, H("83 0B"))), Hx(serialRx.ToArray())); serialRx.Clear(); }
+    CheckTrue("reverse: tid increments", rgw.LastTransactionId == 2 && rgw.Stats.Timeouts == 1 && rgw.Stats.Responses == 1);
+    remoteSilent = false;
+    // 迟到的旧应答（tid 2）应被丢弃，下一次请求仍匹配正确
+    serialSide.Inject(ModbusGatewayCodec.BuildRtu(1, H("03 00 02 00 01")));
+    CheckTrue("reverse: next request after timeout ok", await WaitFor(() => { lock (serialRx) return serialRx.Count >= 7; }));
+    lock (serialRx) { Check("reverse: stale reply skipped", Hx(ModbusGatewayCodec.BuildRtu(1, H("03 02 12 34"))), Hx(serialRx.Take(7).ToArray())); serialRx.Clear(); }
+    await rgw.StopAsync();
+    remote.Stop();
+    var rgw2 = new ModbusRtuToTcpGateway(serialSide, "127.0.0.1", 1) { ConnectTimeoutMs = 1000 };
+    var unreach = await rgw2.ProcessAsync(ModbusGatewayCodec.BuildRtu(1, H("03 00 00 00 01")));
+    Check("reverse: remote unreachable -> 0A", Hx(ModbusGatewayCodec.BuildRtu(1, H("83 0A"))), Hx(unreach!));
+}
+
+// =====================================================================
+// v1.5：Lua 脚本
+// =====================================================================
+{
+    Console.WriteLine("\n== v1.5 Lua ==");
+    var lch = new FakeChannel("Lua 会话");
+    lch.Responder = d =>
+    {
+        var t = Encoding.ASCII.GetString(d);
+        if (t == "AT\r\n") return A("\r\nOK\r\n");
+        if (t.StartsWith("PING")) return A("PONG " + t.Substring(4));
+        return null;
+    };
+    var lh = new LuaScriptHost(lch);
+    var lout = new ConcurrentQueue<string>();
+    lh.Output += m => lout.Enqueue(m);
+    var lr = lh.Execute(@"
+send('AT\r\n')
+local r = waitfor('OK', 1000)
+log('got', r ~= nil)
+sendhex('01 03 00 00 00 01', 'modbus')
+status = 'done'
+return 1", CancellationToken.None);
+    CheckTrue("lua send/waitfor ok", lr.Status == LuaRunStatus.Ok && lout.Contains("got\ttrue"));
+    CheckTrue("lua sendhex with modbus crc", lch.Sent.Count == 2 && Hx(lch.Sent[1]) == "01 03 00 00 00 01 84 0A");
+    CheckTrue("lua status variable", lh.Status == "done");
+
+    lout.Clear();
+    lh.Execute(@"log(hex(crc16('123456789'), 4)) log(crc16(unhex('01 03 00 00 00 0A'))) log(hex(checksum('modbus', unhex('01 03 00 00 00 0A'))))
+log(sum8('123456789'), xor8('123456789'), hex(crc16_ccitt('123456789'), 4)) log(hex(append_checksum('xor8', unhex('AA 55'))))
+log(waitfor('NOPE', 50) == nil) log(session.name, session.isopen())", CancellationToken.None);
+    var lo = lout.ToArray();
+    CheckTrue("lua crc16 = 4B37", lo.Length > 0 && lo[0] == "4B37");
+    CheckTrue("lua crc16 numeric", lo.Length > 1 && lo[1] == (0xCDC5).ToString());
+    CheckTrue("lua checksum bytes", lo.Length > 2 && lo[2] == "C5 CD");
+    CheckTrue("lua sum8/xor8/ccitt", lo.Length > 3 && lo[3] == "221\t49\t29B1");
+    CheckTrue("lua append_checksum", lo.Length > 4 && lo[4] == "AA 55 FF");
+    CheckTrue("lua waitfor timeout -> nil", lo.Length > 5 && lo[5] == "true");
+    CheckTrue("lua session table", lo.Length > 6 && lo[6] == "Lua 会话\ttrue");
+
+    var er = lh.Execute("local a = 1\nlocal b = 2\nlocal c = nil + a\n", CancellationToken.None);
+    CheckTrue("lua runtime error line number", er.Status == LuaRunStatus.Error && er.Line == 3);
+    var se = lh.Execute("x = 1\nif x then\n  y = = 2\nend", CancellationToken.None);
+    CheckTrue("lua syntax error line number", se.Status == LuaRunStatus.Error && se.Line == 3 && se.Message.Contains("语法"));
+    var ae = lh.Execute("log('a')\n\nsendhex('ZZ')", CancellationToken.None);
+    CheckTrue("lua API error line number", ae.Status == LuaRunStatus.Error && ae.Line == 3);
+
+    // 取消死循环
+    var lcts = new CancellationTokenSource(300);
+    var lsw = System.Diagnostics.Stopwatch.StartNew();
+    var cr = lh.Execute("local n = 0\nwhile true do n = n + 1 end", lcts.Token);
+    CheckTrue("lua cancel busy loop", cr.Status == LuaRunStatus.Cancelled && lsw.ElapsedMilliseconds < 3000);
+    var lcts2 = new CancellationTokenSource(200);
+    var cr2 = lh.Execute("sleep(10000)", lcts2.Token);
+    CheckTrue("lua cancel sleep", cr2.Status == LuaRunStatus.Cancelled);
+
+    // on_receive 回调 + 后台运行 + Stop
+    lch.Sent.Clear();
+    lout.Clear();
+    var bg = new LuaScriptHost(lch);
+    bool runningSeen = false;
+    bg.RunningChanged += r => { if (r) runningSeen = true; };
+    var bgOut = new ConcurrentQueue<string>();
+    bg.Output += m => bgOut.Enqueue(m);
+    var bgTask = bg.RunAsync("count = 0\nfunction on_receive(d)\n  count = count + 1\n  status = 'n=' .. count\n  send('ECHO:' .. d)\nend\nlog('ready')");
+    CheckTrue("lua background ready", await WaitFor(() => bgOut.Contains("ready")) && bg.IsRunning && runningSeen);
+    lch.Inject(A("abc"));
+    CheckTrue("lua on_receive echoes", await WaitFor(() => lch.Sent.Any(x => Encoding.ASCII.GetString(x) == "ECHO:abc")));
+    CheckTrue("lua status from callback", await WaitFor(() => bg.Status == "n=1"));
+    bg.Stop();
+    var bgr = await bgTask;
+    CheckTrue("lua stop background", bgr.Status == LuaRunStatus.Cancelled && !bg.IsRunning);
+    CheckTrue("lua byte string round trip", LuaScriptHost.ToByteString(new byte[] { 0, 0x80, 0xFF }) == "\u0000\u0080\u00FF" && Hx(new LuaScriptHost(lch).FromLuaString("\u0001\u00FF")) == "01 FF");
+    CheckTrue("lua samples compile", LuaSamples.All.All(sm => { try { new MoonSharp.Interpreter.Script().LoadString(sm.Code); return true; } catch { return false; } }));
+}
+
 Console.WriteLine($"\n结果：{pass} 通过，{fail} 失败");
 return fail == 0 ? 0 : 1;
 
@@ -745,4 +1074,37 @@ static class Pty
     [DllImport("libc", SetLastError = true)] public static extern long read(int fd, byte[] buf, long count);
     [DllImport("libc", SetLastError = true)] public static extern long write(int fd, byte[] buf, long count);
     [DllImport("libc", SetLastError = true)] public static extern int close(int fd);
+}
+
+/// <summary>测试用通道：记录发送内容，可按请求自动应答。</summary>
+sealed class FakeChannel : IByteChannel
+{
+    private int _active;
+    public FakeChannel(string name) { Name = name; }
+    public string Name { get; }
+    public bool Open { get; set; } = true;
+    public bool IsOpen => Open;
+    public int DelayMs { get; set; } = 1;
+    public Func<byte[], byte[]?>? Responder { get; set; }
+    public Action<byte[]>? SentHook { get; set; }
+    public List<byte[]> Sent { get; } = new();
+    public int MaxConcurrent { get; private set; }
+    public event Action<byte[]>? Received;
+    public void Inject(byte[] d) => Received?.Invoke(d);
+    public bool Send(byte[] data)
+    {
+        if (!Open) return false;
+        lock (Sent) Sent.Add(data);
+        SentHook?.Invoke(data);
+        var resp = Responder?.Invoke(data);
+        int now = Interlocked.Increment(ref _active);
+        lock (Sent) MaxConcurrent = Math.Max(MaxConcurrent, now);
+        Task.Run(async () =>
+        {
+            await Task.Delay(DelayMs);
+            if (resp != null) Received?.Invoke(resp);
+            Interlocked.Decrement(ref _active);
+        });
+        return true;
+    }
 }

@@ -11,7 +11,7 @@
     <AssemblyName>SerialTool</AssemblyName>
     <RootNamespace>SerialTool</RootNamespace>
     <ApplicationIcon>app.ico</ApplicationIcon>
-    <Version>1.4.0</Version>
+    <Version>1.5.0</Version>
     <Product>SerialTool 串口调试助手</Product>
     <Description>SerialTool 串口调试助手</Description>
     <Copyright>MIT</Copyright>
@@ -22,6 +22,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="MoonSharp" Version="2.0.0" />
     <PackageReference Include="System.IO.Ports" Version="8.0.0" />
     <PackageReference Include="System.Management" Version="8.0.0" />
   </ItemGroup>

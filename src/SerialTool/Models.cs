@@ -140,6 +140,46 @@ public sealed class AppSettings
     public string BaudProbeText { get; set; } = "AT\\r\\n";
     public int BaudListenMs { get; set; } = 600;
 
+    // v1.5：会话标签页 / 批量测试 / Modbus 网关 / Lua
+    /// <summary>会话标签页列表。第 0 项是“主会话”（使用上面的旧字段，保存时同步一份快照），其余为附加会话。</summary>
+    public List<SessionSettings> Sessions { get; set; } = new();
+    public int ActiveSessionIndex { get; set; }
+    public string ScriptLanguage { get; set; } = "DSL";     // 主会话脚本类型：DSL / Lua
+    public string LuaScriptText { get; set; } = "";
+    public string TestSuitePath { get; set; } = "";
+    public int TestLoops { get; set; } = 1;
+    public GatewaySettings Gateway { get; set; } = new();
+
+    /// <summary>
+    /// 迁移 / 规范化会话列表：v1.4 及以前没有 Sessions，把原来的单会话迁移为“会话 1”（第 1 个标签页）。
+    /// 返回 true 表示做了迁移。
+    /// </summary>
+    public static bool MigrateSessions(AppSettings s)
+    {
+        bool migrated = false;
+        s.Sessions ??= new List<SessionSettings>();
+        s.Sessions.RemoveAll(x => x == null);
+        if (s.Sessions.Count == 0)
+        {
+            s.Sessions.Add(SessionSettings.FromLegacy(s, "会话 1"));
+            migrated = true;
+        }
+        var ids = new HashSet<string>();
+        for (int i = 0; i < s.Sessions.Count; i++)
+        {
+            var x = s.Sessions[i];
+            x.Normalize();
+            if (string.IsNullOrWhiteSpace(x.Name)) x.Name = $"会话 {i + 1}";
+            if (!ids.Add(x.Id))
+            {
+                x.Id = Guid.NewGuid().ToString("N");
+                ids.Add(x.Id);
+            }
+        }
+        if (s.ActiveSessionIndex < 0 || s.ActiveSessionIndex >= s.Sessions.Count) s.ActiveSessionIndex = 0;
+        return migrated;
+    }
+
     // 窗口
     public double WindowWidth { get; set; }
     public double WindowHeight { get; set; }
@@ -192,4 +232,115 @@ public sealed class ModbusSlaveSettings
     public int SlaveId { get; set; } = 1;
     public string Framing { get; set; } = "Rtu";
     public int Size { get; set; } = 100;
+}
+
+/// <summary>一个会话（标签页）的全部独立设置：连接参数 + 显示 / 发送选项 + 脚本。</summary>
+public sealed class SessionSettings
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = "会话";
+    // 连接
+    public string ConnType { get; set; } = "Serial";       // Serial / TcpClient / TcpServer / Udp
+    public string PortName { get; set; } = "";
+    public int BaudRate { get; set; } = 115200;
+    public int DataBits { get; set; } = 8;
+    public StopBits StopBits { get; set; } = StopBits.One;
+    public Parity Parity { get; set; } = Parity.None;
+    public Handshake Handshake { get; set; } = Handshake.None;
+    public bool Dtr { get; set; }
+    public bool Rts { get; set; }
+    public string RemoteHost { get; set; } = "127.0.0.1";
+    public int RemotePort { get; set; } = 8080;
+    public int LocalPort { get; set; } = 8080;
+    // 接收显示
+    public bool HexDisplay { get; set; }
+    public bool ShowTimestamp { get; set; }
+    public bool ShowTx { get; set; }
+    public string Encoding { get; set; } = "UTF-8";
+    public int FrameGapMs { get; set; } = 20;
+    public string ProtocolMode { get; set; } = "普通";
+    public bool AutoReplyEnabled { get; set; }
+    // 发送
+    public bool HexSend { get; set; }
+    public bool Escape { get; set; }
+    public string Checksum { get; set; } = "None";
+    public string LineEnding { get; set; } = "";
+    public int TimerIntervalMs { get; set; } = 1000;
+    public string SendText { get; set; } = "";
+    // 脚本
+    public string ScriptLanguage { get; set; } = "DSL";
+    public string ScriptText { get; set; } = "";
+    public string DslScriptText { get; set; } = "";
+    public string LuaScriptText { get; set; } = "";
+
+    public SessionSettings Clone() => (SessionSettings)MemberwiseClone();
+
+    public void Normalize()
+    {
+        Id = string.IsNullOrWhiteSpace(Id) ? Guid.NewGuid().ToString("N") : Id;
+        Name ??= "";
+        ConnType ??= "Serial";
+        PortName ??= "";
+        RemoteHost ??= "127.0.0.1";
+        Encoding ??= "UTF-8";
+        ProtocolMode ??= "普通";
+        Checksum ??= "None";
+        LineEnding ??= "";
+        SendText ??= "";
+        ScriptLanguage ??= "DSL";
+        ScriptText ??= "";
+        DslScriptText ??= "";
+        LuaScriptText ??= "";
+        if (BaudRate <= 0) BaudRate = 115200;
+        if (DataBits < 5 || DataBits > 8) DataBits = 8;
+        if (TimerIntervalMs < 10) TimerIntervalMs = 1000;
+        if (FrameGapMs < 0) FrameGapMs = 20;
+        if (RemotePort <= 0 || RemotePort > 65535) RemotePort = 8080;
+        if (LocalPort < 0 || LocalPort > 65535) LocalPort = 8080;
+    }
+
+    /// <summary>从 v1.4 的单会话字段生成会话设置（迁移 / 主会话快照）。</summary>
+    public static SessionSettings FromLegacy(AppSettings s, string name, string? id = null) => new()
+    {
+        Id = id ?? Guid.NewGuid().ToString("N"),
+        Name = name,
+        ConnType = s.ConnType ?? "Serial",
+        PortName = s.PortName ?? "",
+        BaudRate = s.BaudRate,
+        DataBits = s.DataBits,
+        StopBits = s.StopBits,
+        Parity = s.Parity,
+        Handshake = s.Handshake,
+        Dtr = s.Dtr,
+        Rts = s.Rts,
+        RemoteHost = s.RemoteHost ?? "127.0.0.1",
+        RemotePort = s.RemotePort,
+        LocalPort = s.LocalPort,
+        HexDisplay = s.HexDisplay,
+        ShowTimestamp = s.ShowTimestamp,
+        ShowTx = s.ShowTx,
+        Encoding = s.Encoding ?? "UTF-8",
+        FrameGapMs = s.FrameGapMs,
+        ProtocolMode = s.ProtocolMode ?? "普通",
+        AutoReplyEnabled = s.AutoReplyEnabled,
+        HexSend = s.HexSend,
+        Escape = s.Escape,
+        Checksum = s.Checksum ?? "None",
+        LineEnding = s.LineEnding ?? "",
+        TimerIntervalMs = s.TimerIntervalMs,
+        SendText = s.SendText ?? "",
+        ScriptLanguage = s.ScriptLanguage ?? "DSL",
+        ScriptText = s.ScriptText ?? "",
+    };
+}
+
+public sealed class GatewaySettings
+{
+    public string Mode { get; set; } = "TcpToRtu";   // TcpToRtu / RtuToTcp
+    public int TcpPort { get; set; } = 502;
+    public string RemoteHost { get; set; } = "127.0.0.1";
+    public int RemotePort { get; set; } = 502;
+    public int TimeoutMs { get; set; } = 1000;
+    public int UnitOverride { get; set; }            // 0 = 不改写
+    public string SessionId { get; set; } = "";
 }

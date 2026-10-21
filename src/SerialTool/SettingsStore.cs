@@ -107,6 +107,16 @@ public static class SettingsStore
         s.ReplayContent ??= "All";
         s.BaudProbeText ??= "AT\\r\\n";
         if (s.BaudListenMs < 100 || s.BaudListenMs > 10000) s.BaudListenMs = 600;
+        s.ScriptLanguage ??= "DSL";
+        s.LuaScriptText ??= "";
+        s.TestSuitePath ??= "";
+        if (s.TestLoops < 1) s.TestLoops = 1;
+        s.Gateway ??= new GatewaySettings();
+        s.Gateway.Mode ??= "TcpToRtu";
+        s.Gateway.RemoteHost ??= "127.0.0.1";
+        s.Gateway.SessionId ??= "";
+        if (s.Gateway.TimeoutMs < 50 || s.Gateway.TimeoutMs > 60000) s.Gateway.TimeoutMs = 1000;
+        AppSettings.MigrateSessions(s);
         foreach (var r in s.HighlightRules)
         {
             r.Name ??= "";

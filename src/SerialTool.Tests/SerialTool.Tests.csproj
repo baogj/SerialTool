@@ -22,9 +22,15 @@
     <Compile Include="../SerialTool/Features/XYModem.cs" Link="Linked/XYModem.cs" />
     <Compile Include="../SerialTool/Features/SessionRecorder.cs" Link="Linked/SessionRecorder.cs" />
     <Compile Include="../SerialTool/Features/BaudDetect.cs" Link="Linked/BaudDetect.cs" />
+    <Compile Include="../SerialTool/ByteUtil.cs" Link="Linked/ByteUtil.cs" />
+    <Compile Include="../SerialTool/Features/SessionCore.cs" Link="Linked/SessionCore.cs" />
+    <Compile Include="../SerialTool/Features/TestRunner.cs" Link="Linked/TestRunner.cs" />
+    <Compile Include="../SerialTool/Features/ModbusGateway.cs" Link="Linked/ModbusGateway.cs" />
+    <Compile Include="../SerialTool/Features/LuaScriptHost.cs" Link="Linked/LuaScriptHost.cs" />
     <Compile Include="../SerialTool/SerialSession.cs" Link="Linked/SerialSession.cs" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="MoonSharp" Version="2.0.0" />
     <PackageReference Include="System.IO.Ports" Version="8.0.0" />
   </ItemGroup>
 </Project>

@@ -27,36 +27,36 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
     private const int MaxHistory = 50;
     private const long MaxSendFileBytes = 16L * 1024 * 1024;
 
-    private static readonly string[] BaudPresets =
+    internal static readonly string[] BaudPresets =
     {
         "110", "300", "600", "1200", "2400", "4800", "9600", "14400", "19200", "38400", "57600",
         "115200", "128000", "230400", "256000", "460800", "500000", "921600",
         "1000000", "1500000", "2000000", "3000000",
     };
 
-    private static readonly List<Opt<int>> DataBitsOptions = new()
+    internal static readonly List<Opt<int>> DataBitsOptions = new()
     {
         new("5", 5), new("6", 6), new("7", 7), new("8", 8),
     };
 
-    private static readonly List<Opt<StopBits>> StopBitsOptions = new()
+    internal static readonly List<Opt<StopBits>> StopBitsOptions = new()
     {
         new("1", StopBits.One), new("1.5", StopBits.OnePointFive), new("2", StopBits.Two),
     };
 
-    private static readonly List<Opt<Parity>> ParityOptions = new()
+    internal static readonly List<Opt<Parity>> ParityOptions = new()
     {
         new("无 (None)", Parity.None), new("奇 (Odd)", Parity.Odd), new("偶 (Even)", Parity.Even),
         new("标记 (Mark)", Parity.Mark), new("空格 (Space)", Parity.Space),
     };
 
-    private static readonly List<Opt<Handshake>> FlowOptions = new()
+    internal static readonly List<Opt<Handshake>> FlowOptions = new()
     {
         new("无", Handshake.None), new("RTS/CTS 硬件流控", Handshake.RequestToSend),
         new("XON/XOFF 软件流控", Handshake.XOnXOff), new("RTS/CTS + XON/XOFF", Handshake.RequestToSendXOnXOff),
     };
 
-    private static readonly List<Opt<string>> LineEndingOptions = new()
+    internal static readonly List<Opt<string>> LineEndingOptions = new()
     {
         new("无", ""), new("\\r  (CR)", "\r"), new("\\n  (LF)", "\n"), new("\\r\\n  (CRLF)", "\r\n"),
     };
@@ -98,7 +98,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
     private ScriptEngine? _script;
     private readonly DispatcherTimer _statsTimer;
     private const int MaxProtocolLines = 5000;
-    private static readonly string[] ProtocolModes = { "普通", "AT", "Modbus RTU" };
+    internal static readonly string[] ProtocolModes = { "普通", "AT", "Modbus RTU" };
     private static readonly int[] WaveWindows = { 256, 512, 1024, 2048, 4096, 8192 };
     private readonly List<ProtocolLine> _pausedLines = new();   // 协议/高亮视图暂停期间缓存的行
 
@@ -224,6 +224,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         InitControlsV14();
         ApplyProtocolModeUi();
         UpdateChecksumPreview();
+        InitControlsV15();
     }
 
     private void CollectSettings()
@@ -261,6 +262,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         s.AutoReplyEnabled = AutoReplyChk.IsChecked == true;
         CollectSettingsV13();
         CollectSettingsV14();
+        CollectSettingsV15();
 
         var bounds = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
         if (!bounds.IsEmpty)
@@ -300,6 +302,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         InitV12();
         InitV13();
         InitV14();
+        InitV15();
         SetStatus("就绪。设置文件：" + SettingsStore.FilePath);
     }
 
@@ -322,9 +325,11 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         {
             App.LogCrash(ex);
         }
+        try { ShutdownV15(); } catch (Exception ex) { App.LogCrash(ex); }
 
         var s = _conn;
         _conn = null;
+        _mainChannel.Connection = null;
         if (s != null)
         {
             try { Task.Run(s.Stop).Wait(2500); } catch { /* ignore */ }
@@ -598,6 +603,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         var s = _conn;
         if (s == null) return;
         _conn = null;
+        _mainChannel.Connection = null;
         s.Received -= OnConnReceived;
         _mbWaiter.Cancel();
         OnMainConnectionClosingV14();

@@ -12,7 +12,7 @@ namespace SerialTool;
 
 public partial class MainWindow
 {
-    private static readonly List<Opt<ChecksumKind>> ChecksumOptions =
+    internal static readonly List<Opt<ChecksumKind>> ChecksumOptions =
         Checksum.Options.Select(o => new Opt<ChecksumKind>(o.Name, o.Kind)).ToList();
 
     private static readonly List<Opt<ThemeMode>> ThemeOptions =
@@ -317,6 +317,7 @@ public partial class MainWindow
             ProtocolList.Items.Refresh(); // 可见行按新规则重新着色
             MonitorList.Items.Refresh();
             ApplyProtocolModeUi();
+            UpdateSessionRulesV15();
         }
     }
 
@@ -482,6 +483,7 @@ public partial class MainWindow
 
     private async void ScriptRun_Click(object sender, RoutedEventArgs e)
     {
+        if (TryRunLuaMain()) return;
         if (_script == null) return;
         if (_script.IsRunning)
         {
@@ -499,11 +501,15 @@ public partial class MainWindow
         }
     }
 
-    private void ScriptStop_Click(object sender, RoutedEventArgs e) => _script?.Stop();
+    private void ScriptStop_Click(object sender, RoutedEventArgs e)
+    {
+        _script?.Stop();
+        _luaMain?.Stop();
+    }
 
-    private void ScriptSampleAt_Click(object sender, RoutedEventArgs e) => ScriptBox.Text = ScriptEngine.SampleAtPoll;
+    private void ScriptSampleAt_Click(object sender, RoutedEventArgs e) => ScriptBox.Text = _scriptLang == "Lua" ? LuaSamples.AtTest : ScriptEngine.SampleAtPoll;
 
-    private void ScriptSampleModbus_Click(object sender, RoutedEventArgs e) => ScriptBox.Text = ScriptEngine.SampleModbusRead;
+    private void ScriptSampleModbus_Click(object sender, RoutedEventArgs e) => ScriptBox.Text = _scriptLang == "Lua" ? LuaSamples.ModbusPoll : ScriptEngine.SampleModbusRead;
 
     // ======================================================================
     // 吞吐率

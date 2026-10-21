@@ -1,0 +1,77 @@
+{
+  "Name": "示例：AT 模块 + Modbus 从站冒烟测试",
+  "Description": "前 3 步测试 AT 指令模块，后 2 步测试站号 1 的 Modbus RTU 从站（可用“扩展工具 → Modbus 从站”在另一个会话里模拟）。",
+  "Encoding": "UTF-8",
+  "Steps": [
+    {
+      "Enabled": true,
+      "Name": "AT 握手",
+      "Send": "AT\\r\\n",
+      "SendHex": false,
+      "Escape": true,
+      "Checksum": "None",
+      "Expect": "Contains",
+      "ExpectValue": "OK",
+      "TimeoutMs": 1000,
+      "DelayMs": 0,
+      "Retries": 2,
+      "ContinueOnFail": true
+    },
+    {
+      "Enabled": true,
+      "Name": "查询版本",
+      "Send": "AT+GMR\\r\\n",
+      "SendHex": false,
+      "Escape": true,
+      "Checksum": "None",
+      "Expect": "Regex",
+      "ExpectValue": "\\d+\\.\\d+",
+      "TimeoutMs": 2000,
+      "DelayMs": 0,
+      "Retries": 0,
+      "ContinueOnFail": true
+    },
+    {
+      "Enabled": true,
+      "Name": "信号质量",
+      "Send": "AT+CSQ\\r\\n",
+      "SendHex": false,
+      "Escape": true,
+      "Checksum": "None",
+      "Expect": "Regex",
+      "ExpectValue": "\\+CSQ:\\s*\\d+",
+      "TimeoutMs": 1000,
+      "DelayMs": 100,
+      "Retries": 0,
+      "ContinueOnFail": true
+    },
+    {
+      "Enabled": true,
+      "Name": "读保持寄存器 0~1",
+      "Send": "01 03 00 00 00 02",
+      "SendHex": true,
+      "Escape": true,
+      "Checksum": "ModbusCrc16",
+      "Expect": "ModbusValid",
+      "ExpectValue": "",
+      "TimeoutMs": 500,
+      "DelayMs": 0,
+      "Retries": 1,
+      "ContinueOnFail": true
+    },
+    {
+      "Enabled": true,
+      "Name": "写寄存器 1 = 0x1234（回显）",
+      "Send": "01 06 00 01 12 34",
+      "SendHex": true,
+      "Escape": true,
+      "Checksum": "ModbusCrc16",
+      "Expect": "ExactHex",
+      "ExpectValue": "01 06 00 01 12 34 ?? ??",
+      "TimeoutMs": 500,
+      "DelayMs": 0,
+      "Retries": 0,
+      "ContinueOnFail": true
+    }
+  ]
+}

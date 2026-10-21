@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:f="clr-namespace:SerialTool.Features"
+        xmlns:local="clr-namespace:SerialTool"
         Title="SerialTool 串口调试助手" Width="1280" Height="880" MinWidth="1000" MinHeight="700"
         WindowStartupLocation="CenterScreen" Background="{DynamicResource WindowBgBrush}"
         Foreground="{DynamicResource TextBrush}"
@@ -28,7 +29,14 @@
             </DockPanel>
         </Border>
 
-        <Grid Grid.Row="1" Margin="10,10,10,4">
+        <!-- ============ v1.5：会话标签页 ============ -->
+        <TabControl x:Name="SessionTabs" Grid.Row="1" Margin="8,6,8,0" Padding="0" BorderThickness="0" Background="Transparent"
+                    SelectionChanged="SessionTabs_SelectionChanged">
+            <TabControl.Resources>
+                <Style TargetType="TabItem" BasedOn="{StaticResource ThemedTabItem}"/>
+            </TabControl.Resources>
+            <TabItem x:Name="MainSessionTab" Header="会话 1">
+        <Grid Margin="2,6,2,4">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="300"/>
                 <ColumnDefinition Width="*"/>
@@ -429,14 +437,22 @@
                                         <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
                                             <Button Content="AT 示例" Style="{StaticResource PanelButton}" Margin="0,0,6,0" Click="ScriptSampleAt_Click"/>
                                             <Button Content="Modbus 示例" Style="{StaticResource PanelButton}" Margin="0,0,6,0" Click="ScriptSampleModbus_Click"/>
+                                            <Button x:Name="ScriptSampleEchoBtn" Content="回环示例" Style="{StaticResource PanelButton}" Margin="0,0,6,0" Click="ScriptSampleEcho_Click"
+                                                    Visibility="Collapsed" ToolTip="Lua：on_receive 回调示例"/>
                                             <Button x:Name="ScriptRunBtn" Content="运行" Style="{StaticResource AccentButton}" Padding="14,2"
                                                     Margin="0,0,6,0" Click="ScriptRun_Click"/>
                                             <Button x:Name="ScriptStopBtn" Content="停止" Style="{StaticResource DangerButton}" Padding="14,2"
                                                     IsEnabled="False" Click="ScriptStop_Click"/>
                                         </StackPanel>
-                                        <TextBlock Text="自动化脚本（SEND / SENDHEX / SENDHEXRAW / CHECKSUM / SLEEP / WAITFOR / LOG）"
-                                                   Foreground="{DynamicResource RxHeaderFgBrush}" FontWeight="SemiBold" VerticalAlignment="Center"
-                                                   TextTrimming="CharacterEllipsis"/>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="脚本类型" Foreground="{DynamicResource RxHeaderFgBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                            <ComboBox x:Name="ScriptLangCombo" Width="70" Height="24" Margin="0,0,10,0" SelectionChanged="ScriptLangCombo_SelectionChanged"
+                                                      ToolTip="DSL：简单指令脚本（SEND / WAITFOR …）；Lua：完整 Lua 5.2 脚本（MoonSharp）"/>
+                                            <TextBlock x:Name="ScriptHelpText" Text="SEND / SENDHEX / SENDHEXRAW / CHECKSUM / SLEEP / WAITFOR / LOG"
+                                                       Foreground="{DynamicResource RxHeaderFgBrush}" FontWeight="SemiBold" VerticalAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis" MaxWidth="420"/>
+                                            <TextBlock x:Name="ScriptStatusText" Foreground="#FBBF24" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                                        </StackPanel>
                                     </DockPanel>
                                 </Border>
                                 <TextBox x:Name="ScriptBox" Grid.Row="1" AcceptsReturn="True" AcceptsTab="True"
@@ -931,6 +947,146 @@
                                         </StackPanel>
                                     </Grid>
                                 </TabItem>
+
+                                <!-- v1.5：批量测试 -->
+                                <TabItem Header="批量测试">
+                                    <Grid Background="{DynamicResource RxBgBrush}">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*" MinHeight="120"/>
+                                            <RowDefinition Height="6"/>
+                                            <RowDefinition Height="120" MinHeight="60"/>
+                                        </Grid.RowDefinitions>
+                                        <Border Background="{DynamicResource RxHeaderBgBrush}" Padding="10,5">
+                                            <WrapPanel>
+                                                <TextBlock Text="用例" Foreground="{DynamicResource RxHeaderFgBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                <TextBox x:Name="TestNameBox" Width="170" Style="{StaticResource FieldBox}" Margin="0,2,6,2"/>
+                                                <Button Content="新建" Style="{StaticResource PanelButton}" Margin="0,2,4,2" Click="TestNew_Click"/>
+                                                <Button Content="打开…" Style="{StaticResource PanelButton}" Margin="0,2,4,2" Click="TestOpen_Click"/>
+                                                <Button Content="保存…" Style="{StaticResource PanelButton}" Margin="0,2,4,2" Click="TestSave_Click"/>
+                                                <Button Content="示例" Style="{StaticResource PanelButton}" Margin="0,2,10,2" Click="TestSample_Click"/>
+                                                <Button Content="＋ 步骤" Style="{StaticResource PanelButton}" Margin="0,2,4,2" Click="TestAddStep_Click"/>
+                                                <Button Content="删除" Style="{StaticResource PanelButton}" Margin="0,2,4,2" Click="TestRemoveStep_Click"/>
+                                                <Button Content="↑" Style="{StaticResource PanelButton}" Margin="0,2,4,2" Click="TestMoveUp_Click"/>
+                                                <Button Content="↓" Style="{StaticResource PanelButton}" Margin="0,2,10,2" Click="TestMoveDown_Click"/>
+                                                <TextBlock Text="会话" Foreground="{DynamicResource RxHeaderFgBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                <ComboBox x:Name="TestSessionCombo" Width="120" Height="24" Margin="0,2,6,2"/>
+                                                <TextBlock Text="循环" Foreground="{DynamicResource RxHeaderFgBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                <TextBox x:Name="TestLoopsBox" Width="50" Style="{StaticResource FieldBox}" Margin="0,2,6,2" Text="1"/>
+                                                <Button x:Name="TestRunBtn" Content="运行" Style="{StaticResource AccentButton}" Padding="14,2" Margin="0,2,4,2" Click="TestRun_Click"/>
+                                                <Button x:Name="TestStopBtn" Content="停止" Style="{StaticResource DangerButton}" Padding="14,2" Margin="0,2,10,2" IsEnabled="False" Click="TestStop_Click"/>
+                                                <Button x:Name="TestHtmlBtn" Content="导出 HTML…" Style="{StaticResource PanelButton}" Margin="0,2,4,2" IsEnabled="False" Click="TestExportHtml_Click"/>
+                                                <Button x:Name="TestCsvBtn" Content="导出 CSV…" Style="{StaticResource PanelButton}" Margin="0,2,4,2" IsEnabled="False" Click="TestExportCsv_Click"/>
+                                            </WrapPanel>
+                                        </Border>
+                                        <DataGrid x:Name="TestGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
+                                                  CanUserSortColumns="False" HeadersVisibility="Column" SelectionMode="Single" GridLinesVisibility="Horizontal"
+                                                  RowHeaderWidth="0" FontSize="12">
+                                            <DataGrid.RowStyle>
+                                                <Style TargetType="DataGridRow">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding State}" Value="Running">
+                                                            <Setter Property="Background" Value="#FEF3C7"/>
+                                                            <Setter Property="Foreground" Value="#111827"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding State}" Value="Pass">
+                                                            <Setter Property="Background" Value="#DCFCE7"/>
+                                                            <Setter Property="Foreground" Value="#14532D"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding State}" Value="Fail">
+                                                            <Setter Property="Background" Value="#FEE2E2"/>
+                                                            <Setter Property="Foreground" Value="#7F1D1D"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding State}" Value="Skipped">
+                                                            <Setter Property="Foreground" Value="#9CA3AF"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </DataGrid.RowStyle>
+                                            <DataGrid.Columns>
+                                                <DataGridTextColumn Header="#" Binding="{Binding Index}" IsReadOnly="True" Width="32"/>
+                                                <DataGridCheckBoxColumn Header="启用" Binding="{Binding Enabled, UpdateSourceTrigger=PropertyChanged}" Width="40"/>
+                                                <DataGridTextColumn Header="名称" Binding="{Binding Name}" Width="110"/>
+                                                <DataGridTextColumn Header="发送内容" Binding="{Binding Send}" Width="170"/>
+                                                <DataGridCheckBoxColumn Header="HEX" Binding="{Binding SendHex, UpdateSourceTrigger=PropertyChanged}" Width="40"/>
+                                                <DataGridComboBoxColumn Header="校验" SelectedItemBinding="{Binding Checksum}" ItemsSource="{x:Static local:TestUiOptions.ChecksumNames}" Width="105"/>
+                                                <DataGridComboBoxColumn Header="判定" SelectedItemBinding="{Binding Expect}" ItemsSource="{x:Static local:TestUiOptions.ExpectModes}" Width="100"/>
+                                                <DataGridTextColumn Header="期望" Binding="{Binding ExpectValue}" Width="140"/>
+                                                <DataGridTextColumn Header="超时ms" Binding="{Binding TimeoutMs}" Width="58"/>
+                                                <DataGridTextColumn Header="延时ms" Binding="{Binding DelayMs}" Width="58"/>
+                                                <DataGridTextColumn Header="重试" Binding="{Binding Retries}" Width="40"/>
+                                                <DataGridCheckBoxColumn Header="失败继续" Binding="{Binding ContinueOnFail, UpdateSourceTrigger=PropertyChanged}" Width="60"/>
+                                                <DataGridTextColumn Header="结果" Binding="{Binding ResultText}" IsReadOnly="True" Width="60"/>
+                                                <DataGridTextColumn Header="耗时ms" Binding="{Binding DurationText}" IsReadOnly="True" Width="60"/>
+                                                <DataGridTextColumn Header="说明 / 收到" Binding="{Binding Message}" IsReadOnly="True" Width="*"/>
+                                            </DataGrid.Columns>
+                                        </DataGrid>
+                                        <GridSplitter Grid.Row="2" Height="6" HorizontalAlignment="Stretch" Background="{DynamicResource SplitterBrush}"/>
+                                        <Grid Grid.Row="3">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="*"/>
+                                            </Grid.RowDefinitions>
+                                            <TextBlock x:Name="TestSummaryText" Margin="10,4" FontWeight="SemiBold" Foreground="{DynamicResource RxFgBrush}"
+                                                       Text="判定方式：包含 / 正则 / 精确 HEX（?? 为任意字节）/ Modbus 合法应答 / 不等待。超时、重试、延时以毫秒计。"/>
+                                            <TextBox x:Name="TestLogBox" Grid.Row="1" IsReadOnly="True" FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                                     Background="{DynamicResource ScriptOutBgBrush}" Foreground="{DynamicResource ScriptOutFgBrush}"
+                                                     BorderThickness="0" Padding="8,4" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+                                        </Grid>
+                                    </Grid>
+                                </TabItem>
+
+                                <!-- v1.5：Modbus 网关 -->
+                                <TabItem Header="Modbus 网关">
+                                    <Grid Background="{DynamicResource RxBgBrush}">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*"/>
+                                        </Grid.RowDefinitions>
+                                        <Border Background="{DynamicResource RxHeaderBgBrush}" Padding="10,5">
+                                            <WrapPanel>
+                                                <TextBlock Text="方向" Foreground="{DynamicResource RxHeaderFgBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                <ComboBox x:Name="GwModeCombo" Width="250" Height="24" Margin="0,2,10,2" SelectionChanged="GwModeCombo_SelectionChanged"/>
+                                                <TextBlock Text="RTU 会话" Foreground="{DynamicResource RxHeaderFgBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                <ComboBox x:Name="GwSessionCombo" Width="120" Height="24" Margin="0,2,10,2"
+                                                          ToolTip="连接 RTU 总线的会话（通常是一个串口会话）"/>
+                                                <StackPanel x:Name="GwServerPanel" Orientation="Horizontal">
+                                                    <TextBlock Text="TCP 监听端口" Foreground="{DynamicResource RxHeaderFgBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                    <TextBox x:Name="GwPortBox" Width="60" Style="{StaticResource FieldBox}" Margin="0,2,10,2"/>
+                                                </StackPanel>
+                                                <StackPanel x:Name="GwClientPanel" Orientation="Horizontal" Visibility="Collapsed">
+                                                    <TextBlock Text="远端从站" Foreground="{DynamicResource RxHeaderFgBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                    <TextBox x:Name="GwHostBox" Width="120" Style="{StaticResource FieldBox}" Margin="0,2,4,2"/>
+                                                    <TextBlock Text=":" Foreground="{DynamicResource RxHeaderFgBrush}" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                                                    <TextBox x:Name="GwRemotePortBox" Width="60" Style="{StaticResource FieldBox}" Margin="0,2,10,2"/>
+                                                </StackPanel>
+                                                <TextBlock Text="超时 ms" Foreground="{DynamicResource RxHeaderFgBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                <TextBox x:Name="GwTimeoutBox" Width="60" Style="{StaticResource FieldBox}" Margin="0,2,10,2"/>
+                                                <TextBlock Text="替换站号" Foreground="{DynamicResource RxHeaderFgBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                <TextBox x:Name="GwUnitBox" Width="40" Style="{StaticResource FieldBox}" Margin="0,2,10,2" ToolTip="0 = 不替换，原样转发站号"/>
+                                                <Button x:Name="GwStartBtn" Content="启动网关" Style="{StaticResource AccentButton}" Padding="14,2" Margin="0,2,6,2" Click="GwStart_Click"/>
+                                                <Button Content="清空日志" Style="{StaticResource PanelButton}" Margin="0,2,6,2" Click="GwClear_Click"/>
+                                            </WrapPanel>
+                                        </Border>
+                                        <TextBlock x:Name="GwStatsText" Grid.Row="1" Margin="10,5" Foreground="{DynamicResource RxFgBrush}" FontFamily="{StaticResource MonoFont}"
+                                                   TextWrapping="Wrap" Text="网关未启动。TCP→RTU：本机作为 Modbus TCP 服务器，把请求转成 RTU+CRC 发到所选会话；RTU→TCP：所选会话上的 RTU 主站请求被转发到远端 Modbus TCP 从站。"/>
+                                        <ListBox x:Name="GwLogList" Grid.Row="2" Background="{DynamicResource RxBgBrush}" BorderThickness="0" Padding="6,2"
+                                                 FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                                 VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling">
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock x:Name="t" Text="{Binding Text}" Foreground="{DynamicResource RxFgBrush}" TextWrapping="NoWrap"/>
+                                                    <DataTemplate.Triggers>
+                                                        <DataTrigger Binding="{Binding IsError}" Value="True">
+                                                            <Setter TargetName="t" Property="Foreground" Value="#F87171"/>
+                                                        </DataTrigger>
+                                                    </DataTemplate.Triggers>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+                                    </Grid>
+                                </TabItem>
                             </TabControl>
                         </TabItem>
                     </TabControl>
@@ -993,6 +1149,9 @@
                 </Border>
             </Grid>
         </Grid>
+            </TabItem>
+            <TabItem x:Name="PlusTab" Header="＋" ToolTip="新建会话标签页（每个标签页是一个独立的连接）"/>
+        </TabControl>
 
         <!-- ============ 状态栏 ============ -->
         <Border Grid.Row="2" Background="{DynamicResource StatusBarBgBrush}" Padding="12,5">

@@ -14,7 +14,7 @@ namespace SerialTool;
 /// <summary>v1.3：连接类型（串口 / TCP / UDP）、TCP 服务器客户端、串口转发、CSV 记录、数值曲线。</summary>
 public partial class MainWindow
 {
-    private static readonly List<Opt<ConnectionKind>> ConnTypeOptions = new()
+    internal static readonly List<Opt<ConnectionKind>> ConnTypeOptions = new()
     {
         new("串口", ConnectionKind.Serial), new("TCP 客户端", ConnectionKind.TcpClient),
         new("TCP 服务器", ConnectionKind.TcpServer), new("UDP", ConnectionKind.Udp),
@@ -240,6 +240,7 @@ public partial class MainWindow
             srv.SendTargets = ServerSendSelectedChk.IsChecked == true ? Array.Empty<int>() : null;
         }
         _conn = c;
+        _mainChannel.Connection = c;
         c.Start();
         ApplyServerTargets();
     }
@@ -248,6 +249,7 @@ public partial class MainWindow
     private void OnConnReceived(byte[] data)
     {
         if (OnConnReceivedV14(data)) return; // 文件传输期间独占
+        _mainChannel.RaiseReceived(data);      // v1.5：批量测试 / 网关 / Lua 使用
         _mbWaiter.Feed(data);
         _bridge?.FromLocal(data);
     }
