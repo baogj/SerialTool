@@ -3,6 +3,7 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ImplicitUsings>disable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
@@ -12,6 +13,11 @@
     <Compile Include="../SerialTool/Models.cs" Link="Linked/Models.cs" />
     <Compile Include="../SerialTool/DisplayFormatter.cs" Link="Linked/DisplayFormatter.cs" />
     <Compile Include="../SerialTool/Features/ModbusRtu.cs" Link="Linked/ModbusRtu.cs" />
+    <Compile Include="../SerialTool/Features/ModbusMaster.cs" Link="Linked/ModbusMaster.cs" />
+    <Compile Include="../SerialTool/Features/TextTools.cs" Link="Linked/TextTools.cs" />
+    <Compile Include="../SerialTool/Connections/ConnectionBase.cs" Link="Linked/ConnectionBase.cs" />
+    <Compile Include="../SerialTool/Connections/NetConnections.cs" Link="Linked/NetConnections.cs" />
+    <Compile Include="../SerialTool/SerialSession.cs" Link="Linked/SerialSession.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="System.IO.Ports" Version="8.0.0" />

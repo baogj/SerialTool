@@ -23,6 +23,8 @@ public sealed class ProtocolLine
     public DateTime Time { get; init; }
     public bool IsError { get; init; }
     public LineTone Tone { get; init; } = LineTone.Plain;
+    /// <summary>自定义前景色（多端口监视里每个端口一个颜色）；null = 按 Tone。</summary>
+    public System.Windows.Media.Brush? Foreground { get; init; }
     /// <summary>关键字高亮区间（规则变化时会重算）。</summary>
     public List<HighlightSpan>? Spans { get; set; }
     /// <summary>Spans 对应的规则版本；与 HighlightStyles.Version 不同时在显示时重算（只算可见行）。</summary>

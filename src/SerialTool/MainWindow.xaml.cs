@@ -74,7 +74,8 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
     private readonly DispatcherTimer _sendTimer;
     private readonly StringBuilder _pauseBuffer = new();
 
-    private SerialSession? _session;
+    private IConnection? _conn;
+    private SerialSession? SerialConn => _conn as SerialSession;
     private bool _busy;          // 正在打开 / 关闭
     private bool _loading = true; // 初始化期间屏蔽控件事件
     private bool _historyUpdating;
@@ -219,6 +220,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         var ver = typeof(MainWindow).Assembly.GetName().Version;
         AppTitleText.Text = $"SerialTool 串口调试助手  v{ver?.Major}.{ver?.Minor}.{ver?.Build}";
         RebuildRules();
+        InitControlsV13();
         ApplyProtocolModeUi();
         UpdateChecksumPreview();
     }
@@ -256,6 +258,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         s.Theme = ThemeManager.Mode.ToString();
         s.HighlightEnabled = HighlightChk.IsChecked == true;
         s.AutoReplyEnabled = AutoReplyChk.IsChecked == true;
+        CollectSettingsV13();
 
         var bounds = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
         if (!bounds.IsEmpty)
@@ -293,6 +296,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         _atParser = new AtLineParser(CurrentEncoding());
         _meter.Reset();
         InitV12();
+        InitV13();
         SetStatus("就绪。设置文件：" + SettingsStore.FilePath);
     }
 
@@ -304,6 +308,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         _sendTimer.Stop();
         _statsTimer.Stop();
         try { _script?.Stop(); } catch { /* ignore */ }
+        try { ShutdownV13(); } catch (Exception ex) { App.LogCrash(ex); }
         try
         {
             CollectSettings();
@@ -314,8 +319,8 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
             App.LogCrash(ex);
         }
 
-        var s = _session;
-        _session = null;
+        var s = _conn;
+        _conn = null;
         if (s != null)
         {
             try { Task.Run(s.Stop).Wait(2500); } catch { /* ignore */ }
@@ -329,6 +334,11 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         if (e.Key == Key.F5)
         {
             RefreshPorts(true);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.F && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
+        {
+            OpenSearchBar();
             e.Handled = true;
         }
     }
@@ -346,13 +356,17 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
 
     private void UpdateOpenState()
     {
-        bool open = _session != null;
-        OpenBtn.Content = _busy ? "请稍候…" : open ? "关闭串口" : "打开串口";
+        bool open = _conn != null;
+        var kind = open ? _conn!.Kind : CurrentConnKind();
+        OpenBtn.Content = _busy ? "请稍候…" : OpenButtonText(kind, open);
         OpenBtn.Style = (Style)FindResource(open ? "DangerButton" : "AccentButton");
         OpenBtn.IsEnabled = !_busy;
         PortCombo.IsEnabled = !open && !_busy;
+        ConnTypeCombo.IsEnabled = !open && !_busy;
+        RemoteHostBox.IsEnabled = RemotePortBox.IsEnabled = LocalPortBox.IsEnabled = !open && !_busy;
         StateDot.Fill = open ? OkBrush : IdleBrush;
-        Title = open ? $"SerialTool 串口调试助手 — {_session!.PortName} 已打开" : "SerialTool 串口调试助手";
+        Title = open ? $"SerialTool 串口调试助手 — {_conn!.Name} " + (kind == ConnectionKind.Serial ? "已打开" : "已连接") : "SerialTool 串口调试助手";
+        RefreshServerClients();
     }
 
     private void UpdateCounters()
@@ -405,14 +419,16 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
 
     private void ApplyPortList(string[] names, Dictionary<string, string>? desc)
     {
-        string? keep = _session?.PortName ?? (PortCombo.SelectedItem as PortItem)?.Name ?? _settings.PortName;
+        var serial = SerialConn;
+        string? keep = serial?.PortName ?? (PortCombo.SelectedItem as PortItem)?.Name ?? _settings.PortName;
         var items = names.Select(n => new PortItem(n, desc != null && desc.TryGetValue(n, out var d) ? d : "")).ToList();
-        if (_session != null && !items.Any(i => i.Name.Equals(_session.PortName, StringComparison.OrdinalIgnoreCase)))
-            items.Insert(0, new PortItem(_session.PortName, "(已打开)"));
+        if (serial != null && !items.Any(i => i.Name.Equals(serial.PortName, StringComparison.OrdinalIgnoreCase)))
+            items.Insert(0, new PortItem(serial.PortName, "(已打开)"));
 
         PortCombo.ItemsSource = items;
         PortCombo.SelectedItem = items.FirstOrDefault(i => i.Name.Equals(keep, StringComparison.OrdinalIgnoreCase))
                                  ?? items.FirstOrDefault();
+        RefreshMonitorPortNames(names);
     }
 
     private void PollPorts()
@@ -424,8 +440,8 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         {
             var removed = _lastPortNames.Except(names, StringComparer.OrdinalIgnoreCase).ToList();
             var added = names.Except(_lastPortNames, StringComparer.OrdinalIgnoreCase).ToList();
-            if (_session != null && removed.Contains(_session.PortName, StringComparer.OrdinalIgnoreCase))
-                HandleUnexpectedDisconnect($"串口 {_session.PortName} 已被移除");
+            if (SerialConn is { } sc && removed.Contains(sc.PortName, StringComparer.OrdinalIgnoreCase))
+                HandleUnexpectedDisconnect($"串口 {sc.PortName} 已被移除");
             else if (added.Count > 0)
                 SetStatus("检测到新串口：" + string.Join(", ", added));
             else if (removed.Count > 0)
@@ -433,7 +449,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
             RefreshPorts(false);
         }
 
-        if (_reconnectPort != null && _session == null && !_busy &&
+        if (_reconnectPort != null && _conn == null && !_busy &&
             names.Contains(_reconnectPort, StringComparer.OrdinalIgnoreCase))
         {
             if (AutoReconnectChk.IsChecked == true)
@@ -450,10 +466,15 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
     private async void OpenBtn_Click(object sender, RoutedEventArgs e)
     {
         if (_busy) return;
-        if (_session != null)
+        if (_conn != null)
         {
             _reconnectPort = null;
-            await CloseAsync("串口已关闭");
+            await CloseAsync(_conn.Kind == ConnectionKind.Serial ? "串口已关闭" : $"{_conn.Name} 已断开");
+            return;
+        }
+        if (CurrentConnKind() != ConnectionKind.Serial)
+        {
+            await OpenNetworkAsync(CurrentConnKind());
             return;
         }
         if (PortCombo.SelectedItem is not PortItem item)
@@ -483,7 +504,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
 
     private async Task OpenAsync(string portName, bool userInitiated)
     {
-        if (_busy || _session != null) return;
+        if (_busy || _conn != null) return;
         if (!TryGetBaud(BaudCombo.Text, out int baud, out string? err))
         {
             SetStatus(err!, true);
@@ -535,14 +556,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
             return;
         }
 
-        var session = new SerialSession(port, _queue);
-        session.Faulted += msg => Dispatcher.BeginInvoke(() =>
-        {
-            if (_session == session) HandleUnexpectedDisconnect(msg);
-        });
-        session.Warning += msg => Dispatcher.BeginInvoke(() => SetStatus(msg, true));
-        _session = session;
-        session.Start();
+        AttachConnection(new SerialSession(port, _queue));
 
         _reconnectPort = null;
         _busy = false;
@@ -577,9 +591,11 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
 
     private async Task CloseAsync(string statusMessage, bool error = false)
     {
-        var s = _session;
+        var s = _conn;
         if (s == null) return;
-        _session = null;
+        _conn = null;
+        s.Received -= OnConnReceived;
+        _mbWaiter.Cancel();
         _busy = true;
         StopTimedSend(null);
         UpdateOpenState();
@@ -595,10 +611,10 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
 
     private void HandleUnexpectedDisconnect(string message)
     {
-        var s = _session;
+        var s = _conn;
         if (s == null) return;
-        bool reconnect = AutoReconnectChk.IsChecked == true;
-        _reconnectPort = reconnect ? s.PortName : null;
+        bool reconnect = AutoReconnectChk.IsChecked == true && s is SerialSession;
+        _reconnectPort = reconnect ? ((SerialSession)s).PortName : null;
         _ = CloseAsync(message + (reconnect ? "，等待设备重新连接…" : ""), true);
     }
 
@@ -609,7 +625,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
     private void ApplyLive(Action<SerialPort> apply, string what)
     {
         if (_loading) return;
-        var s = _session;
+        var s = SerialConn;
         if (s == null || _busy) return;
         try
         {
@@ -640,13 +656,13 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
 
     private void ApplyBaud(string text)
     {
-        if (_loading || _session == null) return;
+        if (_loading || SerialConn == null) return;
         if (!TryGetBaud(text, out int baud, out string? err))
         {
             SetStatus(err!, true);
             return;
         }
-        if (_session.Port.BaudRate == baud) return;
+        if (SerialConn.Port.BaudRate == baud) return;
         ApplyLive(p => p.BaudRate = baud, "波特率");
     }
 
@@ -654,7 +670,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
     {
         if (_loading) return;
         if (sender == FlowCombo) UpdateRtsAvailability();
-        if (_session == null) return;
+        if (_conn == null) return;
 
         if (sender == DataBitsCombo && DataBitsCombo.SelectedItem is Opt<int> db)
             ApplyLive(p => p.DataBits = db.Value, "数据位");
@@ -791,6 +807,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
 
                 _waveBuf.Push(c);
                 waveDirty = true;
+                RecordChunk(c);
 
                 if (!c.IsTx)
                 {
@@ -835,6 +852,8 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
             if (waveDirty) _waveElement?.InvalidateVisual();
             ScrollLinesToEnd();
         }
+        FlushRecorders();
+        FlushMonitors();
         UpdateCounters();
     }
 
@@ -891,6 +910,8 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         ResetOpenLine();
         _modbus.Reset();
         _atParser = new AtLineParser(CurrentEncoding());
+        ClearRecords();
+        UpdateSearchCount();
     }
 
     private void SaveRx_Click(object sender, RoutedEventArgs e)
@@ -1038,10 +1059,10 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
 
     private bool SendNow(string content, bool hex, bool recordHistory)
     {
-        var s = _session;
+        var s = _conn;
         if (s == null)
         {
-            SetStatus("串口未打开", true);
+            SetStatus(NotOpenMessage, true);
             return false;
         }
         if (!TryBuildPayload(content, hex, null, null, true, out byte[] data, out int ms, out int ml, out string? error))
@@ -1056,7 +1077,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         }
         if (!s.Send(data, ms, ml))
         {
-            SetStatus("发送队列已满或串口正在关闭，本次未发送", true);
+            SetStatus("发送队列已满或连接正在关闭，本次未发送", true);
             return false;
         }
         if (recordHistory) AddHistory(content, hex);
@@ -1111,10 +1132,10 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
 
     private void SendFile_Click(object sender, RoutedEventArgs e)
     {
-        var s = _session;
+        var s = _conn;
         if (s == null)
         {
-            SetStatus("串口未打开", true);
+            SetStatus(NotOpenMessage, true);
             return;
         }
         var dlg = new OpenFileDialog { Title = "选择要发送的文件", Filter = "所有文件 (*.*)|*.*" };
@@ -1157,10 +1178,10 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
             StopTimedSend("定时发送已停止");
             return;
         }
-        if (_session == null)
+        if (_conn == null)
         {
             TimedChk.IsChecked = false;
-            SetStatus("请先打开串口再启用定时发送", true);
+            SetStatus("请先打开串口 / 建立连接再启用定时发送", true);
             return;
         }
         if (!TryGetInterval(out int ms))
@@ -1194,10 +1215,10 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
 
     private void TimedSendTick()
     {
-        var s = _session;
+        var s = _conn;
         if (s == null)
         {
-            StopTimedSend("串口已关闭，定时发送停止");
+            StopTimedSend("连接已关闭，定时发送停止");
             return;
         }
         if (s.PendingBytes > 64 * 1024) return; // 上一批还没写完（如被流控阻塞），跳过本次

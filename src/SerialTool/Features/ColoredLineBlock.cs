@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
@@ -25,18 +26,45 @@ public static class HighlightStyles
         Version++;
     }
 
+    public const int SearchIndex = -2;
+    private static readonly (Brush Bg, Brush Fg) SearchStyle = Make("#FB923C");
+
+    /// <summary>Ctrl+F 查找词（null = 不显示查找高亮）。</summary>
+    public static LineFilter? Search { get; private set; }
+
+    public static void SetSearch(LineFilter? search)
+    {
+        Search = search;
+        Version++;
+    }
+
     public static List<HighlightSpan>? SpansFor(ProtocolLine line)
     {
         if (line.SpansVersion != Version)
         {
-            line.Spans = Active.Count == 0 ? null : HighlightMatcher.Find(line.Text, Active);
+            var spans = Active.Count == 0 ? null : HighlightMatcher.Find(line.Text, Active);
+            if (Search != null) spans = MergeSearch(line.Text, spans, Search);
+            line.Spans = spans;
             line.SpansVersion = Version;
         }
         return line.Spans;
     }
 
+    /// <summary>查找高亮优先：去掉与之重叠的规则高亮。</summary>
+    private static List<HighlightSpan>? MergeSearch(string text, List<HighlightSpan>? rules, LineFilter search)
+    {
+        var found = search.FindAll(text, 200);
+        if (found.Count == 0) return rules;
+        var list = found.Select(f => new HighlightSpan(f.Start, f.Length, SearchIndex)).ToList();
+        if (rules != null)
+            foreach (var r in rules)
+                if (!list.Any(s => r.Start < s.Start + s.Length && s.Start < r.Start + r.Length)) list.Add(r);
+        list.Sort((a, b) => a.Start.CompareTo(b.Start));
+        return list;
+    }
+
     public static (Brush Bg, Brush Fg) Get(int index) =>
-        index >= 0 && index < _styles.Length ? _styles[index] : Make("#FDE047");
+        index == SearchIndex ? SearchStyle : index >= 0 && index < _styles.Length ? _styles[index] : Make("#FDE047");
 
     public static Color ParseColor(string? s, Color fallback)
     {
@@ -81,7 +109,7 @@ public sealed class ColoredLineBlock : TextBlock
         Inlines.Clear();
         var line = Line;
         if (line == null) return;
-        Foreground = ThemeManager.ToneBrush(line.Tone);
+        Foreground = line.Foreground ?? ThemeManager.ToneBrush(line.Tone);
         string text = line.Text;
         var spans = HighlightStyles.SpansFor(line);
         if (spans == null || spans.Count == 0)

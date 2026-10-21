@@ -18,6 +18,7 @@ public sealed class DisplayFormatter
     private bool _atLineStart = true;
     private bool? _lastIsTx;
     private System.DateTime _lastTime;
+    private string? _lastSource;
 
     public DisplayFormatter()
     {
@@ -51,6 +52,7 @@ public sealed class DisplayFormatter
     {
         _atLineStart = true;
         _lastIsTx = null;
+        _lastSource = null;
     }
 
     /// <summary>如果当前不在行首则换行。</summary>
@@ -68,11 +70,13 @@ public sealed class DisplayFormatter
         bool framing = Timestamp || ShowTx;
         if (framing)
         {
-            bool newFrame = _lastIsTx != c.IsTx || (c.Time - _lastTime).TotalMilliseconds > FrameGapMs;
+            bool newFrame = _lastIsTx != c.IsTx || (c.Time - _lastTime).TotalMilliseconds > FrameGapMs
+                            || !string.Equals(_lastSource, c.Source, System.StringComparison.Ordinal);
             if (newFrame) BreakLine(sb);
         }
         _lastIsTx = c.IsTx;
         _lastTime = c.Time;
+        _lastSource = c.Source;
 
         if (Hex)
         {
@@ -133,5 +137,6 @@ public sealed class DisplayFormatter
     {
         if (Timestamp) sb.Append('[').Append(c.Time.ToString("HH:mm:ss.fff")).Append("] ");
         if (ShowTx) sb.Append(c.IsTx ? "发→ " : "收← ");
+        if (c.Source != null) sb.Append('[').Append(c.Source).Append("] ");
     }
 }

@@ -76,6 +76,25 @@ public static class SettingsStore
         s.Checksum ??= "None";
         s.HighlightRules ??= AppSettings.DefaultHighlightRules();
         s.HighlightRules.RemoveAll(r => r == null);
+        s.Modbus ??= new ModbusMasterSettings();
+        s.Modbus.Values ??= "";
+        if (s.Modbus.TimeoutMs < 10) s.Modbus.TimeoutMs = 1000;
+        if (s.Modbus.PollMs < 50) s.Modbus.PollMs = 1000;
+        s.MonitorPorts ??= new List<MonitorPortSettings>();
+        s.MonitorPorts.RemoveAll(m => m == null);
+        foreach (var m in s.MonitorPorts)
+        {
+            m.PortName ??= "";
+            m.Alias ??= "";
+            m.Format ??= "8N1";
+            m.Color ??= "#2563EB";
+            if (m.BaudRate <= 0) m.BaudRate = 115200;
+        }
+        s.ConnType ??= "Serial";
+        s.RemoteHost ??= "127.0.0.1";
+        s.BridgeType ??= "TcpServer";
+        s.BridgeHost ??= "127.0.0.1";
+        if (s.CurveWindow < 50) s.CurveWindow = 500;
         foreach (var r in s.HighlightRules)
         {
             r.Name ??= "";

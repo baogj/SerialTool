@@ -11,6 +11,8 @@ public sealed record DataChunk(bool IsTx, byte[] Data, DateTime Time)
     /// <summary>发送时自动追加的校验字节位置（-1 = 无），用于在文本回显里以 [HEX] 形式显示。</summary>
     public int MarkStart { get; init; } = -1;
     public int MarkLength { get; init; }
+    /// <summary>网络连接的来源 / 目标（如 TCP 服务器的客户端地址、UDP 来包地址），串口为 null。</summary>
+    public string? Source { get; init; }
 }
 
 /// <summary>下拉框选项：显示文本 + 实际值。</summary>
@@ -109,6 +111,19 @@ public sealed class AppSettings
     public bool AutoReplyEnabled { get; set; }
     public List<SerialTool.Features.HighlightRule> HighlightRules { get; set; } = DefaultHighlightRules();
 
+    // v1.3：网络连接 / 转发 / Modbus 主站 / 多端口 / 曲线
+    public string ConnType { get; set; } = "Serial";       // Serial / TcpClient / TcpServer / Udp
+    public string RemoteHost { get; set; } = "127.0.0.1";
+    public int RemotePort { get; set; } = 8080;
+    public int LocalPort { get; set; } = 8080;
+    public string BridgeType { get; set; } = "TcpServer";
+    public string BridgeHost { get; set; } = "127.0.0.1";
+    public int BridgePort { get; set; } = 9000;
+    public int BridgeLocalPort { get; set; } = 9000;
+    public ModbusMasterSettings Modbus { get; set; } = new();
+    public List<MonitorPortSettings> MonitorPorts { get; set; } = new();
+    public int CurveWindow { get; set; } = 500;
+
     // 窗口
     public double WindowWidth { get; set; }
     public double WindowHeight { get; set; }
@@ -130,4 +145,28 @@ public sealed class AppSettings
         new QuickCommand { Name = "复位 AT+RST", Content = "AT+RST" },
         new QuickCommand { Name = "HEX 示例", Content = "AA 55 01 00", IsHex = true },
     };
+}
+
+public sealed class ModbusMasterSettings
+{
+    public int Slave { get; set; } = 1;
+    public int Function { get; set; } = 3;
+    public int Start { get; set; }
+    public int Quantity { get; set; } = 10;
+    public string Values { get; set; } = "";
+    public int TimeoutMs { get; set; } = 1000;
+    public int PollMs { get; set; } = 1000;
+    public string Format { get; set; } = "UInt16";
+    public string Order { get; set; } = "ABCD";
+    public bool TcpFraming { get; set; }
+}
+
+public sealed class MonitorPortSettings
+{
+    public string PortName { get; set; } = "";
+    public int BaudRate { get; set; } = 115200;
+    public string Format { get; set; } = "8N1";
+    public string Alias { get; set; } = "";
+    public string Color { get; set; } = "#2563EB";
+    public bool Hex { get; set; }
 }

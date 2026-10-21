@@ -39,8 +39,8 @@ public partial class MainWindow
     // ScriptEngine.IHost
     // ======================================================================
 
-    bool ScriptEngine.IHost.IsPortOpen => Dispatcher.Invoke(() => _session != null);
-    string? ScriptEngine.IHost.PortName => Dispatcher.Invoke(() => _session?.PortName);
+    bool ScriptEngine.IHost.IsPortOpen => Dispatcher.Invoke(() => _conn != null);
+    string? ScriptEngine.IHost.PortName => Dispatcher.Invoke(() => _conn?.Name);
     Encoding ScriptEngine.IHost.Encoding => Dispatcher.Invoke(CurrentEncoding);
 
     bool ScriptEngine.IHost.SendText(string text, bool escape, ChecksumKind? checksum, out string? error) =>
@@ -54,8 +54,8 @@ public partial class MainWindow
         string? err = null;
         bool ok = Dispatcher.Invoke(() =>
         {
-            var s = _session;
-            if (s == null) { err = "串口未打开"; return false; }
+            var s = _conn;
+            if (s == null) { err = NotOpenMessage; return false; }
             if (!TryBuildPayload(content, hex, escape, checksum, lineEnding, out byte[] data, out int ms, out int ml, out err)) return false;
             if (data.Length == 0) { err = "发送内容为空"; return false; }
             if (!s.Send(data, ms, ml)) { err = "发送队列已满"; return false; }
@@ -101,7 +101,7 @@ public partial class MainWindow
     {
         string mode = CurrentMode;
         RxView target = mode != "普通" ? RxView.Protocol
-            : _highlightRules.Count > 0 ? RxView.PlainLines
+            : _highlightRules.Count > 0 || _filterOn ? RxView.PlainLines
             : RxView.Text;
 
         if (target != _rxView)
@@ -119,7 +119,7 @@ public partial class MainWindow
         if (mode != "Modbus RTU") FrameText.Text = "";
         ViewHint.Text = target switch
         {
-            RxView.PlainLines => "高亮视图",
+            RxView.PlainLines => _filterOn ? "行视图（过滤中）" : "高亮视图",
             RxView.Protocol => _highlightRules.Count > 0 ? "着色 + 高亮" : "着色视图",
             _ => "",
         };
@@ -185,6 +185,7 @@ public partial class MainWindow
             // 一次超出很多时整体重建，避免逐条 RemoveAt(0) 的 O(n²)
             _protocolLines = new ObservableCollection<ProtocolLine>(_protocolLines.Skip(over));
             ProtocolList.ItemsSource = _protocolLines;
+            ApplyLineFilter();
         }
         else
         {
@@ -282,6 +283,7 @@ public partial class MainWindow
     private void ScrollLinesToEnd()
     {
         if (ProtocolList.Visibility != Visibility.Visible || AutoScrollChk.IsChecked != true) return;
+        if (_searchHold) return; // 正在查看查找结果时不自动滚到底
         int n = ProtocolList.Items.Count;
         if (n > 0) ProtocolList.ScrollIntoView(ProtocolList.Items[n - 1]);
     }
@@ -313,6 +315,7 @@ public partial class MainWindow
         if (!_loading)
         {
             ProtocolList.Items.Refresh(); // 可见行按新规则重新着色
+            MonitorList.Items.Refresh();
             ApplyProtocolModeUi();
         }
     }
@@ -349,7 +352,7 @@ public partial class MainWindow
         try
         {
             if (rule.ReplyDelayMs > 0) await Task.Delay(Math.Min(rule.ReplyDelayMs, 600_000));
-            if (_closingWindow || _session == null || AutoReplyChk.IsChecked != true) return;
+            if (_closingWindow || _conn == null || AutoReplyChk.IsChecked != true) return;
             if (SendNow(rule.ReplyContent, rule.ReplyIsHex, false))
             {
                 _autoReplyCount++;
@@ -435,7 +438,10 @@ public partial class MainWindow
     private void OnThemeChanged()
     {
         ProtocolList.Items.Refresh();
+        MonitorList.Items.Refresh();
         _waveElement?.InvalidateVisual();
+        _curveElement?.InvalidateVisual();
+        RefreshMonitorColors();
     }
 
     // ======================================================================
