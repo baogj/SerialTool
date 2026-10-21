@@ -1,0 +1,45 @@
+<Window x:Class="SerialTool.QuickCommandsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="编辑快捷指令" Width="700" Height="460" MinWidth="520" MinHeight="320"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False" ResizeMode="CanResizeWithGrip"
+        FontFamily="Microsoft YaHei UI" FontSize="13" Background="#F3F5F8">
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,8"
+                   Text="双击单元格编辑。名称为空时按钮显示内容；勾选 HEX 后内容按十六进制解析（如 AA 55 01）。发送时会追加左侧“行尾”设置；文本指令支持“解析转义符”。"/>
+        <DataGrid x:Name="CmdGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
+                  CanUserSortColumns="False" CanUserReorderColumns="False" SelectionMode="Single" SelectionUnit="FullRow"
+                  HeadersVisibility="Column" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#E5E7EB"
+                  RowHeight="28" Background="White" BorderBrush="#E3E7ED">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="名称" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="160"/>
+                <DataGridTextColumn Header="内容" Binding="{Binding Content, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                <DataGridTemplateColumn Header="HEX" Width="60">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <CheckBox IsChecked="{Binding IsHex, UpdateSourceTrigger=PropertyChanged}"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+            </DataGrid.Columns>
+        </DataGrid>
+        <DockPanel Grid.Row="2" Margin="0,10,0,0">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button Content="确定" Style="{StaticResource AccentButton}" Width="84" IsDefault="True" Click="Ok_Click"/>
+                <Button Content="取消" Width="84" Margin="8,0,0,0" IsCancel="True"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal">
+                <Button Content="添加" Width="64" Click="Add_Click"/>
+                <Button Content="删除" Width="64" Margin="6,0,0,0" Click="Delete_Click"/>
+                <Button Content="上移" Width="64" Margin="6,0,0,0" Click="Up_Click"/>
+                <Button Content="下移" Width="64" Margin="6,0,0,0" Click="Down_Click"/>
+            </StackPanel>
+        </DockPanel>
+    </Grid>
+</Window>
