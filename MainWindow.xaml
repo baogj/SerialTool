@@ -1,7 +1,7 @@
 <Window x:Class="SerialTool.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="SerialTool 串口调试助手" Width="1200" Height="800" MinWidth="960" MinHeight="620"
+        Title="SerialTool 串口调试助手" Width="1280" Height="860" MinWidth="1000" MinHeight="680"
         WindowStartupLocation="CenterScreen" Background="#F3F5F8"
         FontFamily="Microsoft YaHei UI" FontSize="13" Icon="app.ico"
         Loaded="Window_Loaded" Closing="Window_Closing" PreviewKeyDown="Window_PreviewKeyDown">
@@ -100,6 +100,7 @@
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
                                 <TextBlock Text="编码" Style="{StaticResource FieldLabel}"/>
                                 <ComboBox x:Name="EncodingCombo" Grid.Column="1" SelectionChanged="EncodingCombo_SelectionChanged"
@@ -110,6 +111,10 @@
                                              ToolTip="开启时间戳/显示发送时，两次数据间隔超过该值则另起一行"/>
                                     <TextBlock Text="ms（时间戳分行间隔）" Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" Margin="6,0,0,0" FontSize="12"/>
                                 </StackPanel>
+                                <TextBlock Grid.Row="2" Text="协议" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox x:Name="ProtocolCombo" Grid.Row="2" Grid.Column="1"
+                                          ToolTip="普通：原样显示；AT：命令/回显着色；Modbus RTU：帧解析+CRC"
+                                          SelectionChanged="ProtocolCombo_SelectionChanged"/>
                             </Grid>
                             <UniformGrid Columns="2" Margin="0,8,0,0">
                                 <Button Content="清空接收" Margin="0,0,4,0" Click="ClearRx_Click"/>
@@ -156,37 +161,160 @@
                     <RowDefinition x:Name="SendRow" Height="250" MinHeight="170"/>
                 </Grid.RowDefinitions>
 
-                <!-- 接收区 -->
+                <!-- 接收 / 波形 / 脚本 -->
                 <Border Style="{StaticResource Card}" Margin="0" Padding="0" Background="#1E1E1E" BorderBrush="#2D2D2D">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
-                        </Grid.RowDefinitions>
-                        <Border Background="#252526" CornerRadius="6,6,0,0" Padding="12,6">
-                            <DockPanel>
-                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                    <Border x:Name="PausedBadge" Background="#F59E0B" CornerRadius="3" Padding="6,1" Margin="0,0,8,0"
-                                            VerticalAlignment="Center" Visibility="Collapsed">
-                                        <TextBlock Text="已暂停" Foreground="Black" FontSize="12"/>
-                                    </Border>
-                                    <Border x:Name="LogBadge" Background="#10B981" CornerRadius="3" Padding="6,1" Margin="0,0,8,0"
-                                            VerticalAlignment="Center" Visibility="Collapsed">
-                                        <TextBlock Text="记录中" Foreground="Black" FontSize="12"/>
-                                    </Border>
-                                    <Button Content="清空" Style="{StaticResource SmallButton}" Background="#3A3D41" Foreground="#E5E7EB"
-                                            BorderBrush="#4B5563" Click="ClearRx_Click"/>
-                                </StackPanel>
-                                <TextBlock Text="接收区" Foreground="#E5E7EB" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                            </DockPanel>
-                        </Border>
-                        <TextBox x:Name="RxBox" Grid.Row="1" IsReadOnly="True" IsReadOnlyCaretVisible="False"
-                                 Background="#1E1E1E" Foreground="#D4D4D4" BorderThickness="0" Padding="8,6"
-                                 FontFamily="{StaticResource MonoFont}" FontSize="13"
-                                 TextWrapping="Wrap" AcceptsReturn="True" IsUndoEnabled="False" UndoLimit="0"
-                                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                                 VerticalContentAlignment="Top" SelectionBrush="#264F78"/>
-                    </Grid>
+                    <TabControl x:Name="MainTabs" Background="#1E1E1E" BorderThickness="0" Padding="0">
+                        <TabControl.Resources>
+                            <Style TargetType="TabItem">
+                                <Setter Property="Foreground" Value="#D1D5DB"/>
+                                <Setter Property="Padding" Value="12,4"/>
+                                <Setter Property="Background" Value="#252526"/>
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="TabItem">
+                                            <Border x:Name="Bd" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}" Margin="0,0,2,0" CornerRadius="4,4,0,0">
+                                                <ContentPresenter ContentSource="Header" RecognizesAccessKey="True"/>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter TargetName="Bd" Property="Background" Value="#3B82F6"/>
+                                                    <Setter Property="Foreground" Value="White"/>
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </TabControl.Resources>
+
+                        <!-- 接收 -->
+                        <TabItem Header="接收">
+                            <Grid Background="#1E1E1E">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+                                <Border Background="#252526" Padding="12,6">
+                                    <DockPanel>
+                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                            <Border x:Name="PausedBadge" Background="#F59E0B" CornerRadius="3" Padding="6,1" Margin="0,0,8,0"
+                                                    VerticalAlignment="Center" Visibility="Collapsed">
+                                                <TextBlock Text="已暂停" Foreground="Black" FontSize="12"/>
+                                            </Border>
+                                            <Border x:Name="LogBadge" Background="#10B981" CornerRadius="3" Padding="6,1" Margin="0,0,8,0"
+                                                    VerticalAlignment="Center" Visibility="Collapsed">
+                                                <TextBlock Text="记录中" Foreground="Black" FontSize="12"/>
+                                            </Border>
+                                            <TextBlock x:Name="ProtocolHint" Text="" Foreground="#9CA3AF" FontSize="12"
+                                                       VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                            <Button Content="清空" Style="{StaticResource SmallButton}" Background="#3A3D41" Foreground="#E5E7EB"
+                                                    BorderBrush="#4B5563" Click="ClearRx_Click"/>
+                                        </StackPanel>
+                                        <TextBlock Text="接收区" Foreground="#E5E7EB" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                    </DockPanel>
+                                </Border>
+                                <!-- 普通：TextBox；协议：ListBox -->
+                                <TextBox x:Name="RxBox" Grid.Row="1" IsReadOnly="True" IsReadOnlyCaretVisible="False"
+                                         Background="#1E1E1E" Foreground="#D4D4D4" BorderThickness="0" Padding="8,6"
+                                         FontFamily="{StaticResource MonoFont}" FontSize="13"
+                                         TextWrapping="Wrap" AcceptsReturn="True" IsUndoEnabled="False" UndoLimit="0"
+                                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                                         VerticalContentAlignment="Top" SelectionBrush="#264F78"/>
+                                <ListBox x:Name="ProtocolList" Grid.Row="1" Visibility="Collapsed"
+                                         Background="#1E1E1E" BorderThickness="0" Padding="4"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                         VirtualizingPanel.IsVirtualizing="True"
+                                         VirtualizingPanel.VirtualizationMode="Recycling">
+                                    <ListBox.ItemContainerStyle>
+                                        <Style TargetType="ListBoxItem">
+                                            <Setter Property="Padding" Value="2,1"/>
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                            <Setter Property="Background" Value="Transparent"/>
+                                            <Setter Property="Foreground" Value="#D4D4D4"/>
+                                            <Setter Property="Template">
+                                                <Setter.Value>
+                                                    <ControlTemplate TargetType="ListBoxItem">
+                                                        <ContentPresenter/>
+                                                    </ControlTemplate>
+                                                </Setter.Value>
+                                            </Setter>
+                                        </Style>
+                                    </ListBox.ItemContainerStyle>
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Text}" Foreground="{Binding Foreground}"
+                                                       FontFamily="{StaticResource MonoFont}" FontSize="13"
+                                                       TextWrapping="Wrap"/>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Grid>
+                        </TabItem>
+
+                        <!-- 波形 -->
+                        <TabItem Header="波形">
+                            <Grid Background="#111827">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+                                <Border Background="#1F2937" Padding="10,6">
+                                    <DockPanel>
+                                        <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                                            <CheckBox x:Name="WaveShowTxChk" Content="显示 TX" Foreground="#E5E7EB" Margin="0,0,12,0"
+                                                      Click="WaveOption_Click"/>
+                                            <CheckBox x:Name="WavePauseChk" Content="暂停" Foreground="#E5E7EB" Margin="0,0,12,0"
+                                                      Click="WavePause_Click"/>
+                                            <TextBlock Text="窗口" Foreground="#9CA3AF" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                            <ComboBox x:Name="WaveWindowCombo" Width="90" Height="26" SelectionChanged="WaveWindow_Changed"/>
+                                            <Button Content="清空波形" Style="{StaticResource SmallButton}" Margin="10,0,0,0"
+                                                    Background="#374151" Foreground="#E5E7EB" BorderBrush="#4B5563"
+                                                    Click="WaveClear_Click"/>
+                                        </StackPanel>
+                                        <TextBlock Text="字节流波形（Y=0..255）" Foreground="#E5E7EB" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                    </DockPanel>
+                                </Border>
+                                <Border x:Name="WaveHost" Grid.Row="1" Background="#111827"/>
+                            </Grid>
+                        </TabItem>
+
+                        <!-- 脚本 -->
+                        <TabItem Header="脚本">
+                            <Grid Background="#1E1E1E">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*" MinHeight="120"/>
+                                    <RowDefinition Height="6"/>
+                                    <RowDefinition Height="140" MinHeight="80"/>
+                                </Grid.RowDefinitions>
+                                <Border Background="#252526" Padding="10,6">
+                                    <DockPanel>
+                                        <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                                            <Button Content="AT 示例" Style="{StaticResource SmallButton}" Background="#3A3D41" Foreground="#E5E7EB"
+                                                    BorderBrush="#4B5563" Margin="0,0,6,0" Click="ScriptSampleAt_Click"/>
+                                            <Button Content="Modbus 示例" Style="{StaticResource SmallButton}" Background="#3A3D41" Foreground="#E5E7EB"
+                                                    BorderBrush="#4B5563" Margin="0,0,6,0" Click="ScriptSampleModbus_Click"/>
+                                            <Button x:Name="ScriptRunBtn" Content="运行" Style="{StaticResource AccentButton}" Padding="14,2"
+                                                    Margin="0,0,6,0" Click="ScriptRun_Click"/>
+                                            <Button x:Name="ScriptStopBtn" Content="停止" Style="{StaticResource DangerButton}" Padding="14,2"
+                                                    IsEnabled="False" Click="ScriptStop_Click"/>
+                                        </StackPanel>
+                                        <TextBlock Text="自动化脚本（SEND / SENDHEX / SLEEP / WAITFOR / LOG）"
+                                                   Foreground="#E5E7EB" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                    </DockPanel>
+                                </Border>
+                                <TextBox x:Name="ScriptBox" Grid.Row="1" AcceptsReturn="True" AcceptsTab="True"
+                                         TextWrapping="Wrap" FontFamily="{StaticResource MonoFont}" FontSize="13"
+                                         Background="#1E1E1E" Foreground="#D4D4D4" BorderThickness="0" Padding="8"
+                                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+                                <GridSplitter Grid.Row="2" Height="6" HorizontalAlignment="Stretch" Background="#374151"/>
+                                <TextBox x:Name="ScriptOutBox" Grid.Row="3" IsReadOnly="True"
+                                         FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                         Background="#0B1220" Foreground="#93C5FD" BorderThickness="0" Padding="8"
+                                         TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+                            </Grid>
+                        </TabItem>
+                    </TabControl>
                 </Border>
 
                 <GridSplitter Grid.Row="1" Height="8" HorizontalAlignment="Stretch" VerticalAlignment="Center"
@@ -202,7 +330,6 @@
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
 
-                        <!-- 快捷指令 -->
                         <DockPanel Margin="0,0,0,4">
                             <Button DockPanel.Dock="Right" Content="编辑快捷指令…" Style="{StaticResource SmallButton}"
                                     VerticalAlignment="Top" Margin="6,0,0,0" Click="EditQuick_Click"/>
@@ -210,7 +337,6 @@
                             <WrapPanel x:Name="QuickPanel"/>
                         </DockPanel>
 
-                        <!-- 发送工具栏 -->
                         <DockPanel Grid.Row="1" Margin="0,2,0,6">
                             <TextBlock Text="发送区" Style="{StaticResource CardTitle}" Margin="0,0,14,0" VerticalAlignment="Center"/>
                             <TextBlock Text="历史" Style="{StaticResource FieldLabel}"/>
@@ -254,10 +380,18 @@
         <Border Grid.Row="1" Background="#1F2937" Padding="12,5">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <TextBlock x:Name="RateText" Text="RX: 0 B/s  TX: 0 B/s" Foreground="#FCD34D" VerticalAlignment="Center"
+                               FontFamily="{StaticResource MonoFont}" Margin="0,0,12,0" MinWidth="210"/>
+                    <TextBlock x:Name="PeakText" Text="峰值 —" Foreground="#A78BFA" VerticalAlignment="Center"
+                               FontFamily="{StaticResource MonoFont}" Margin="0,0,12,0" MinWidth="160"/>
+                    <TextBlock x:Name="SessionText" Text="会话 00:00" Foreground="#9CA3AF" VerticalAlignment="Center"
+                               FontFamily="{StaticResource MonoFont}" Margin="0,0,12,0" MinWidth="90"/>
+                    <TextBlock x:Name="FrameText" Text="" Foreground="#F9A8D4" VerticalAlignment="Center"
+                               FontFamily="{StaticResource MonoFont}" Margin="0,0,12,0"/>
                     <TextBlock x:Name="RxCountText" Text="RX: 0" Foreground="#93C5FD" VerticalAlignment="Center"
-                               FontFamily="{StaticResource MonoFont}" Margin="12,0,0,0" MinWidth="120"/>
+                               FontFamily="{StaticResource MonoFont}" Margin="0,0,0,0" MinWidth="100"/>
                     <TextBlock x:Name="TxCountText" Text="TX: 0" Foreground="#86EFAC" VerticalAlignment="Center"
-                               FontFamily="{StaticResource MonoFont}" Margin="8,0,8,0" MinWidth="120"/>
+                               FontFamily="{StaticResource MonoFont}" Margin="8,0,8,0" MinWidth="100"/>
                     <Button Content="计数清零" Style="{StaticResource SmallButton}" Background="#374151" Foreground="#E5E7EB"
                             BorderBrush="#4B5563" Click="ResetCounters_Click"/>
                 </StackPanel>

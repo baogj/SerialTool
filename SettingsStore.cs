@@ -69,6 +69,9 @@ public static class SettingsStore
         if (s.DataBits < 5 || s.DataBits > 8) s.DataBits = 8;
         if (s.TimerIntervalMs < 1) s.TimerIntervalMs = 1000;
         if (s.FrameGapMs < 0) s.FrameGapMs = 20;
+        s.ProtocolMode ??= "普通";
+        if (s.WaveWindowLength < 64) s.WaveWindowLength = 1024;
+        s.ScriptText ??= "";
         return s;
     }
 

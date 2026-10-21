@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.ObjectModel;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
@@ -14,9 +15,11 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Win32;
 
+using SerialTool.Features;
+
 namespace SerialTool;
 
-public partial class MainWindow : Window
+public partial class MainWindow : Window, Features.ScriptEngine.IHost
 {
     private const int MaxDisplayChars = 1_500_000;   // 接收区超过该长度时裁剪
     private const int TrimDisplayChars = 1_000_000;  // 裁剪后保留的长度
@@ -84,6 +87,29 @@ public partial class MainWindow : Window
     private int _refreshVersion;
     private string? _reconnectPort; // 意外断开且启用自动重连时，等待该端口重新出现
 
+    // ---- v1.1 新功能 ----
+    private readonly ThroughputMeter _meter = new();
+    private readonly WaveformBuffer _waveBuf = new();
+    private WaveformElement? _waveElement;
+    private readonly ObservableCollection<ProtocolLine> _protocolLines = new();
+    private AtLineParser? _atParser;
+    private readonly ModbusRtuParser _modbus = new(50);
+    private ScriptEngine? _script;
+    private readonly DispatcherTimer _statsTimer;
+    private const int MaxProtocolLines = 5000;
+    private static readonly string[] ProtocolModes = { "普通", "AT", "Modbus RTU" };
+    private static readonly int[] WaveWindows = { 256, 512, 1024, 2048, 4096, 8192 };
+    private static readonly Brush ModbusOkBrush = FreezeStatic(Color.FromRgb(0x4A, 0xDE, 0x80));
+    private static readonly Brush ModbusFailBrush = FreezeStatic(Color.FromRgb(0xF8, 0x71, 0x71));
+    private static readonly Brush ModbusMetaBrush = FreezeStatic(Color.FromRgb(0x93, 0xC5, 0xFD));
+
+    private static Brush FreezeStatic(Color c)
+    {
+        var b = new SolidColorBrush(c);
+        b.Freeze();
+        return b;
+    }
+
     public MainWindow()
     {
         InitializeComponent();
@@ -95,6 +121,8 @@ public partial class MainWindow : Window
         _pollTimer.Tick += (_, _) => PollPorts();
         _sendTimer = new DispatcherTimer(DispatcherPriority.Normal);
         _sendTimer.Tick += (_, _) => TimedSendTick();
+        _statsTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(1000) };
+        _statsTimer.Tick += (_, _) => UpdateThroughputUi();
 
         InitControls();
     }
@@ -155,6 +183,18 @@ public partial class MainWindow : Window
         }
         if (s.WindowMaximized) WindowState = WindowState.Maximized;
         if (s.SendPanelHeight >= 170) SendRow.Height = new GridLength(s.SendPanelHeight);
+
+        ProtocolCombo.ItemsSource = ProtocolModes;
+        ProtocolCombo.SelectedItem = ProtocolModes.Contains(s.ProtocolMode) ? s.ProtocolMode : ProtocolModes[0];
+        WaveShowTxChk.IsChecked = s.WaveShowTx;
+        WaveWindowCombo.ItemsSource = WaveWindows;
+        int ww = s.WaveWindowLength <= 0 ? 1024 : s.WaveWindowLength;
+        WaveWindowCombo.SelectedItem = WaveWindows.Contains(ww) ? ww : 1024;
+        _waveBuf.ShowTx = s.WaveShowTx;
+        _waveBuf.WindowLength = (int)(WaveWindowCombo.SelectedItem ?? 1024);
+        ScriptBox.Text = s.ScriptText ?? "";
+        ProtocolList.ItemsSource = _protocolLines;
+        ApplyProtocolModeUi();
     }
 
     private void CollectSettings()
@@ -182,6 +222,10 @@ public partial class MainWindow : Window
         s.LineEnding = (LineEndingCombo.SelectedItem as Opt<string>)?.Value ?? "";
         if (int.TryParse(IntervalBox.Text.Trim(), out int iv) && iv >= 1) s.TimerIntervalMs = iv;
         s.SendText = SendBox.Text;
+        s.ProtocolMode = ProtocolCombo.SelectedItem as string ?? "普通";
+        s.WaveShowTx = WaveShowTxChk.IsChecked == true;
+        if (WaveWindowCombo.SelectedItem is int wlen) s.WaveWindowLength = wlen;
+        s.ScriptText = ScriptBox.Text;
 
         var bounds = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
         if (!bounds.IsEmpty)
@@ -202,6 +246,22 @@ public partial class MainWindow : Window
         RefreshPorts(false);
         _uiTimer.Start();
         _pollTimer.Start();
+        _statsTimer.Start();
+        _waveElement = new WaveformElement(_waveBuf);
+        WaveHost.Child = _waveElement;
+        _script = new ScriptEngine(this);
+        _script.Output += msg => Dispatcher.BeginInvoke(() =>
+        {
+            ScriptOutBox.AppendText(msg + "\r\n");
+            ScriptOutBox.ScrollToEnd();
+        });
+        _script.RunningChanged += running => Dispatcher.BeginInvoke(() =>
+        {
+            ScriptRunBtn.IsEnabled = !running;
+            ScriptStopBtn.IsEnabled = running;
+        });
+        _atParser = new AtLineParser(CurrentEncoding());
+        _meter.Reset();
         SetStatus("就绪。设置文件：" + SettingsStore.FilePath);
     }
 
@@ -211,6 +271,8 @@ public partial class MainWindow : Window
         _uiTimer.Stop();
         _pollTimer.Stop();
         _sendTimer.Stop();
+        _statsTimer.Stop();
+        try { _script?.Stop(); } catch { /* ignore */ }
         try
         {
             CollectSettings();
@@ -275,7 +337,9 @@ public partial class MainWindow : Window
     {
         _rxTotal = 0;
         _txTotal = 0;
+        _meter.Reset();
         UpdateCounters();
+        UpdateThroughputUi();
     }
 
     // ======================================================================
@@ -656,7 +720,21 @@ public partial class MainWindow : Window
         {
             string text = _pauseBuffer.ToString();
             _pauseBuffer.Clear();
-            AppendDisplay(text);
+            string mode = ProtocolCombo.SelectedItem as string ?? "普通";
+            if (mode == "普通")
+                AppendDisplay(text);
+            else
+            {
+                foreach (var raw in text.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    AppendProtocolLine(new ProtocolLine
+                    {
+                        Text = raw,
+                        Kind = AtLineKind.Plain,
+                        Foreground = ModbusMetaBrush,
+                    });
+                }
+            }
         }
     }
 
@@ -667,14 +745,73 @@ public partial class MainWindow : Window
         {
             var sb = new StringBuilder();
             long bytes = 0;
+            bool waveDirty = false;
+            string mode = ProtocolCombo.SelectedItem as string ?? "普通";
             while (bytes < MaxBytesPerTick && _queue.TryDequeue(out var c))
             {
                 bytes += c.Data.Length;
-                if (c.IsTx) _txTotal += c.Data.Length;
-                else _rxTotal += c.Data.Length;
-                _formatter.Format(c, sb);
+                if (c.IsTx)
+                {
+                    _txTotal += c.Data.Length;
+                    _meter.AddTx(c.Data.Length);
+                }
+                else
+                {
+                    _rxTotal += c.Data.Length;
+                    _meter.AddRx(c.Data.Length);
+                }
+
+                _waveBuf.Push(c);
+                waveDirty = true;
+
+                // 脚本等待缓冲：文本形式
+                try
+                {
+                    string t = CurrentEncoding().GetString(c.Data);
+                    _script?.FeedRx(t);
+                }
+                catch { /* ignore */ }
+
+                if (mode == "普通")
+                {
+                    _formatter.Format(c, sb);
+                }
+                else if (mode == "AT")
+                {
+                    if (_atParser == null) _atParser = new AtLineParser(CurrentEncoding());
+                    foreach (var line in _atParser.Push(c, CurrentEncoding()))
+                    {
+                        if (PauseChk.IsChecked == true)
+                            _pauseBuffer.Append(line.Text).Append("\r\n");
+                        else
+                            AppendProtocolLine(line);
+                    }
+                }
+                else if (mode == "Modbus RTU")
+                {
+                    foreach (var frame in _modbus.Push(c))
+                    {
+                        _meter.AddFrame(frame.CrcOk);
+                        var line = new ProtocolLine
+                        {
+                            Text = frame.Summary + "  " + ModbusRtuParser.FormatHex(frame.Raw),
+                            Kind = frame.CrcOk ? AtLineKind.Ok : AtLineKind.Error,
+                            IsTx = frame.IsTx,
+                            Time = frame.Time,
+                            IsError = !frame.CrcOk,
+                            Foreground = frame.CrcOk ? ModbusOkBrush : ModbusFailBrush,
+                        };
+                        if (PauseChk.IsChecked == true)
+                            _pauseBuffer.Append(line.Text).Append("\r\n");
+                        else
+                            AppendProtocolLine(line);
+                    }
+                }
             }
             if (sb.Length > 0) EmitText(sb.ToString());
+            if (waveDirty) _waveElement?.InvalidateVisual();
+            if (mode != "普通" && AutoScrollChk.IsChecked == true && ProtocolList.Items.Count > 0)
+                ProtocolList.ScrollIntoView(ProtocolList.Items[ProtocolList.Items.Count - 1]);
         }
         UpdateCounters();
     }
@@ -722,6 +859,9 @@ public partial class MainWindow : Window
         _displayLen = 0;
         _pauseBuffer.Clear();
         _formatter.ResetLine();
+        _protocolLines.Clear();
+        _modbus.Reset();
+        _atParser = new AtLineParser(CurrentEncoding());
     }
 
     private void SaveRx_Click(object sender, RoutedEventArgs e)
@@ -735,7 +875,10 @@ public partial class MainWindow : Window
         if (dlg.ShowDialog(this) != true) return;
         try
         {
-            File.WriteAllText(dlg.FileName, RxBox.Text + _pauseBuffer, new UTF8Encoding(true));
+            string body = ProtocolList.Visibility == Visibility.Visible
+                ? string.Join("\r\n", System.Linq.Enumerable.Select(_protocolLines, l => l.Text))
+                : RxBox.Text + _pauseBuffer;
+            File.WriteAllText(dlg.FileName, body, new UTF8Encoding(true));
             SetStatus("已保存到 " + dlg.FileName);
         }
         catch (Exception ex)

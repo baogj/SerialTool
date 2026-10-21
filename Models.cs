@@ -91,6 +91,12 @@ public sealed class AppSettings
     public List<HistoryItem> History { get; set; } = new();
     public List<QuickCommand> QuickCommands { get; set; } = DefaultQuickCommands();
 
+    // 协议 / 波形 / 脚本
+    public string ProtocolMode { get; set; } = "普通"; // 普通 / AT / Modbus RTU
+    public bool WaveShowTx { get; set; } = true;
+    public int WaveWindowLength { get; set; } = 1024;
+    public string ScriptText { get; set; } = "";
+
     // 窗口
     public double WindowWidth { get; set; }
     public double WindowHeight { get; set; }
