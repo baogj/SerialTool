@@ -11,7 +11,7 @@
     <AssemblyName>SerialTool</AssemblyName>
     <RootNamespace>SerialTool</RootNamespace>
     <ApplicationIcon>app.ico</ApplicationIcon>
-    <Version>1.3.0</Version>
+    <Version>1.4.0</Version>
     <Product>SerialTool 串口调试助手</Product>
     <Description>SerialTool 串口调试助手</Description>
     <Copyright>MIT</Copyright>
@@ -30,4 +30,8 @@
     <Resource Include="app.ico" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 显示器关闭 / 远程桌面断开时 WPF 仍然渲染（避免窗口内容空白） -->
+    <RuntimeHostConfigurationOption Include="Switch.System.Windows.Media.ShouldRenderEvenWhenNoDisplayDevicesAreAvailable" Value="true" />
+  </ItemGroup>
 </Project>

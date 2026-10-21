@@ -95,6 +95,18 @@ public static class SettingsStore
         s.BridgeType ??= "TcpServer";
         s.BridgeHost ??= "127.0.0.1";
         if (s.CurveWindow < 50) s.CurveWindow = 500;
+        s.FrameTemplateName ??= "";
+        s.Slave ??= new ModbusSlaveSettings();
+        s.Slave.Framing ??= "Rtu";
+        if (s.Slave.SlaveId < 1 || s.Slave.SlaveId > 247) s.Slave.SlaveId = 1;
+        if (s.Slave.Size < 1 || s.Slave.Size > 10000) s.Slave.Size = 100;
+        s.TransferProtocol ??= "YModem";
+        s.TransferDir ??= "";
+        s.ReplaySpeed ??= "1";
+        s.ReplayTarget ??= "View";
+        s.ReplayContent ??= "All";
+        s.BaudProbeText ??= "AT\\r\\n";
+        if (s.BaudListenMs < 100 || s.BaudListenMs > 10000) s.BaudListenMs = 600;
         foreach (var r in s.HighlightRules)
         {
             r.Name ??= "";

@@ -221,6 +221,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         AppTitleText.Text = $"SerialTool 串口调试助手  v{ver?.Major}.{ver?.Minor}.{ver?.Build}";
         RebuildRules();
         InitControlsV13();
+        InitControlsV14();
         ApplyProtocolModeUi();
         UpdateChecksumPreview();
     }
@@ -259,6 +260,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         s.HighlightEnabled = HighlightChk.IsChecked == true;
         s.AutoReplyEnabled = AutoReplyChk.IsChecked == true;
         CollectSettingsV13();
+        CollectSettingsV14();
 
         var bounds = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
         if (!bounds.IsEmpty)
@@ -297,6 +299,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         _meter.Reset();
         InitV12();
         InitV13();
+        InitV14();
         SetStatus("就绪。设置文件：" + SettingsStore.FilePath);
     }
 
@@ -309,6 +312,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         _statsTimer.Stop();
         try { _script?.Stop(); } catch { /* ignore */ }
         try { ShutdownV13(); } catch (Exception ex) { App.LogCrash(ex); }
+        try { ShutdownV14(); } catch (Exception ex) { App.LogCrash(ex); }
         try
         {
             CollectSettings();
@@ -596,6 +600,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         _conn = null;
         s.Received -= OnConnReceived;
         _mbWaiter.Cancel();
+        OnMainConnectionClosingV14();
         _busy = true;
         StopTimedSend(null);
         UpdateOpenState();
@@ -805,11 +810,12 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
                     _meter.AddRx(c.Data.Length);
                 }
 
+                if (!ProcessChunkV14(c)) continue; // 录制；文件传输期间不显示
                 _waveBuf.Push(c);
                 waveDirty = true;
                 RecordChunk(c);
 
-                if (!c.IsTx)
+                if (!c.IsTx && !c.Replayed)
                 {
                     // 脚本 WAITFOR 只看接收数据（v1.1 误把发送回显也算进去）
                     try { _script?.FeedRx(CurrentEncoding().GetString(c.Data)); }
@@ -854,6 +860,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         }
         FlushRecorders();
         FlushMonitors();
+        FlushV14();
         UpdateCounters();
     }
 

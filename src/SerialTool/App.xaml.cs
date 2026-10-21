@@ -24,7 +24,15 @@ public partial class App : Application
 
         base.OnStartup(e);
 
+        // 可选启动参数：
+        //   --software-render  强制 WPF 软件渲染（远程桌面 / 虚拟机 / 显卡驱动异常导致窗口空白时使用）
+        //   --no-activate      启动时不抢占焦点（后台启动，不打断正在使用的程序）
+        bool HasArg(string name) => Array.Exists(e.Args, a => string.Equals(a, name, StringComparison.OrdinalIgnoreCase));
+        if (HasArg("--software-render") || Environment.GetEnvironmentVariable("SERIALTOOL_SOFTWARE_RENDER") == "1")
+            System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
+
         var window = new MainWindow();
+        if (HasArg("--no-activate")) window.ShowActivated = false;
         MainWindow = window;
         window.Show();
     }

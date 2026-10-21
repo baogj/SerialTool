@@ -1,0 +1,55 @@
+<Window x:Class="SerialTool.BaudDetectWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="波特率自动识别" Width="860" Height="600" MinWidth="700" MinHeight="460"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False" ResizeMode="CanResizeWithGrip"
+        FontFamily="Microsoft YaHei UI" FontSize="13"
+        Background="{DynamicResource WindowBgBrush}" Foreground="{DynamicResource TextBrush}">
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <TextBlock x:Name="HeaderText" FontWeight="SemiBold" Margin="0,0,0,6"/>
+        <TextBlock Grid.Row="1" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                   Text="依次以各波特率打开串口，监听设备输出（可先发送探测命令），按“可打印字符比例、字母数字、CRLF、00/FF 帧错误特征”打分（0~100）。设备需要在监听期间有输出：可以开启探测命令，或在识别时让设备复位/打印日志。"/>
+        <WrapPanel x:Name="RatesPanel" Grid.Row="2" Margin="0,0,0,6"/>
+        <WrapPanel Grid.Row="3" Margin="0,0,0,8">
+            <CheckBox x:Name="ProbeChk" Content="每个波特率先发送探测" VerticalAlignment="Center" Margin="0,0,6,0"/>
+            <TextBox x:Name="ProbeBox" Width="140" Style="{StaticResource FieldBox}" Margin="0,3,14,3" FontFamily="{StaticResource MonoFont}"
+                     ToolTip="支持转义 \r \n \t \xHH"/>
+            <TextBlock Text="每个波特率监听" Style="{StaticResource FieldLabel}"/>
+            <TextBox x:Name="ListenBox" Width="56" Style="{StaticResource FieldBox}" Margin="0,3,2,3"/>
+            <TextBlock Text="ms" Style="{StaticResource MutedText}" Margin="0,0,14,0"/>
+            <Button x:Name="StartBtn" Content="开始识别" Style="{StaticResource AccentButton}" Padding="16,3" Margin="0,3,6,3" Click="Start_Click"/>
+            <Button x:Name="StopBtn" Content="停止" Style="{StaticResource DangerButton}" Padding="16,3" Margin="0,3" IsEnabled="False" Click="Stop_Click"/>
+        </WrapPanel>
+        <DataGrid x:Name="ResultGrid" Grid.Row="4" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False"
+                  HeadersVisibility="Column" SelectionMode="Single" FontFamily="{StaticResource MonoFont}"
+                  MouseDoubleClick="ResultGrid_MouseDoubleClick">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="波特率" Binding="{Binding Baud}" Width="80"/>
+                <DataGridTextColumn Header="字节数" Binding="{Binding Bytes}" Width="64"/>
+                <DataGridTextColumn Header="得分" Binding="{Binding Score}" Width="60"/>
+                <DataGridTextColumn Header="可打印" Binding="{Binding PrintableRatio, StringFormat=P0}" Width="64"/>
+                <DataGridTextColumn Header="说明" Binding="{Binding Note}" Width="150"/>
+                <DataGridTextColumn Header="数据预览" Binding="{Binding Preview}" Width="*"/>
+            </DataGrid.Columns>
+        </DataGrid>
+        <ProgressBar x:Name="Progress" Grid.Row="5" Height="12" Margin="0,8,0,0" Minimum="0" Maximum="100"
+                     Foreground="{DynamicResource AccentBrush}" Background="{DynamicResource TabBgBrush}" BorderThickness="0"/>
+        <DockPanel Grid.Row="6" Margin="0,10,0,0">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button x:Name="ApplyBtn" Content="应用" Style="{StaticResource AccentButton}" Width="90" Margin="0,0,8,0" IsEnabled="False" Click="Apply_Click"/>
+                <Button x:Name="ApplyOpenBtn" Content="应用并打开" Width="100" Margin="0,0,8,0" IsEnabled="False" Click="ApplyOpen_Click"/>
+                <Button Content="关闭" Width="80" IsCancel="True"/>
+            </StackPanel>
+            <TextBlock x:Name="BestText" VerticalAlignment="Center" FontWeight="SemiBold" TextWrapping="Wrap"/>
+        </DockPanel>
+    </Grid>
+</Window>

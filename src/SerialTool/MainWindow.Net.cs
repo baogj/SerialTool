@@ -247,6 +247,7 @@ public partial class MainWindow
     /// <summary>主连接收到数据（后台线程）：交给 Modbus 主站与串口转发。</summary>
     private void OnConnReceived(byte[] data)
     {
+        if (OnConnReceivedV14(data)) return; // 文件传输期间独占
         _mbWaiter.Feed(data);
         _bridge?.FromLocal(data);
     }

@@ -13,6 +13,8 @@ public sealed record DataChunk(bool IsTx, byte[] Data, DateTime Time)
     public int MarkLength { get; init; }
     /// <summary>网络连接的来源 / 目标（如 TCP 服务器的客户端地址、UDP 来包地址），串口为 null。</summary>
     public string? Source { get; init; }
+    /// <summary>v1.4：来自会话回放（不触发自动回复 / 脚本 / 从站 / 录制）。</summary>
+    public bool Replayed { get; init; }
 }
 
 /// <summary>下拉框选项：显示文本 + 实际值。</summary>
@@ -124,6 +126,20 @@ public sealed class AppSettings
     public List<MonitorPortSettings> MonitorPorts { get; set; } = new();
     public int CurveWindow { get; set; } = 500;
 
+    // v1.4：帧模板 / Modbus 从站 / 文件传输 / 录制回放 / 波特率识别
+    public string FrameTemplateName { get; set; } = "";
+    public bool FrameParseEnabled { get; set; }
+    public bool FrameParseTx { get; set; }
+    public ModbusSlaveSettings Slave { get; set; } = new();
+    public string TransferProtocol { get; set; } = "YModem";
+    public string TransferDir { get; set; } = "";
+    public string ReplaySpeed { get; set; } = "1";
+    public string ReplayTarget { get; set; } = "View";
+    public string ReplayContent { get; set; } = "All";
+    public bool BaudProbe { get; set; } = true;
+    public string BaudProbeText { get; set; } = "AT\\r\\n";
+    public int BaudListenMs { get; set; } = 600;
+
     // 窗口
     public double WindowWidth { get; set; }
     public double WindowHeight { get; set; }
@@ -169,4 +185,11 @@ public sealed class MonitorPortSettings
     public string Alias { get; set; } = "";
     public string Color { get; set; } = "#2563EB";
     public bool Hex { get; set; }
+}
+
+public sealed class ModbusSlaveSettings
+{
+    public int SlaveId { get; set; } = 1;
+    public string Framing { get; set; } = "Rtu";
+    public int Size { get; set; } = 100;
 }

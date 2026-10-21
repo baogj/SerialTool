@@ -359,6 +359,380 @@ finally
     if (ptm >= 0) Pty.close(ptm);
 }
 
+
+// =====================================================================
+// v1.4：自定义帧模板
+// =====================================================================
+{
+    var tpl = FrameTemplate.Sample();
+    CheckTrue("frame: sample template valid", tpl.Validate() == null);
+    var fp = new FrameParser(tpl);
+    var r = fp.Push(H("AA 55 05 01 00 FA 01 C2 C3"), t0);
+    Check("frame: sample count", "1", r.Count.ToString());
+    CheckTrue("frame: sample ok", r.Count == 1 && r[0].Ok);
+    Check("frame: sample 命令", "1", r[0].Fields.First(f => f.Name == "命令").Value);
+    Check("frame: sample 温度", "25 ℃", r[0].Fields.First(f => f.Name == "温度").Value);
+    Check("frame: sample 湿度", "45 %", r[0].Fields.First(f => f.Name == "湿度").Value);
+
+    // 负温度：-12.5 ℃ = 0xFF83
+    var neg = H("AA 55 05 02 FF 83 00 64");
+    byte s = 0; foreach (var b in neg.Skip(2)) s += b;
+    var fNeg = fp.Push(neg.Concat(new[] { s }).ToArray(), t0);
+    Check("frame: negative I16 scaled", "-12.5 ℃", fNeg.Single().Fields[1].Value);
+
+    // 校验错误
+    var fBad = fp.Push(H("AA 55 05 01 00 FA 01 C2 C4"), t0);
+    CheckTrue("frame: bad checksum flagged", fBad.Count == 1 && !fBad[0].Ok && fBad[0].Error!.Contains("校验"));
+    Check("frame: bad checksum still decodes fields", "25 ℃", fBad[0].Fields[1].Value);
+
+    // 跨块拆分 + 前导垃圾 + 连续两帧
+    var fp2 = new FrameParser(tpl);
+    var all = new List<ParsedFrame>();
+    all.AddRange(fp2.Push(H("00 11 AA"), t0));
+    all.AddRange(fp2.Push(H("55 05 01"), t0.AddMilliseconds(10)));
+    all.AddRange(fp2.Push(H("00 FA 01 C2"), t0.AddMilliseconds(20)));
+    CheckTrue("frame: split chunks -> nothing yet", all.Count == 0 && fp2.Pending > 0);
+    all.AddRange(fp2.Push(H("C3 AA 55 05 01 00 FA 01 C2 C3"), t0.AddMilliseconds(30)));
+    CheckTrue("frame: split chunks -> 2 ok frames", all.Count == 2 && all.All(f => f.Ok));
+    CheckTrue("frame: skipped garbage counted", fp2.SkippedBytes == 2);
+    Check("frame: ok/bad counters", "2/0", $"{fp2.OkCount}/{fp2.BadCount}");
+
+    // 半帧超时丢弃
+    var fp3 = new FrameParser(tpl);
+    fp3.Push(H("AA 55 05 01"), t0);
+    var late = fp3.Push(H("AA 55 05 01 00 FA 01 C2 C3"), t0.AddMilliseconds(5000));
+    CheckTrue("frame: partial timeout resyncs", late.Count == 1 && late[0].Ok);
+
+    // 帧尾 + 2 字节小端长度（计入整帧）+ Modbus CRC + u32 LE + float BE
+    var t2 = new FrameTemplate
+    {
+        Name = "t2", Header = "7E", Tail = "0D 0A", HasLength = true, LengthOffset = 1, LengthSize = 2, LengthBigEndian = false,
+        LengthCountsHeader = true, LengthCountsLengthField = true, LengthCountsChecksum = true, LengthCountsTail = true,
+        Checksum = ChecksumKind.ModbusCrc16, ChecksumFrom = 0,
+        Fields = new()
+        {
+            new FrameField { Name = "计数", Offset = 3, Type = FrameFieldType.U32, BigEndian = false },
+            new FrameField { Name = "电压", Offset = 7, Type = FrameFieldType.Float, BigEndian = true, Unit = "V" },
+        },
+    };
+    CheckTrue("frame: t2 valid", t2.Validate() == null);
+    byte[] body = H("7E 0F 00 78 56 34 12 3F C0 00 00");
+    byte[] f2 = Checksum.Append(ChecksumKind.ModbusCrc16, body).Concat(H("0D 0A")).ToArray();
+    var p2 = new FrameParser(t2);
+    var o2 = p2.Push(f2, t0);
+    CheckTrue("frame: t2 ok", o2.Count == 1 && o2[0].Ok);
+    Check("frame: t2 u32 LE", "305419896", o2[0].Fields[0].Value);
+    Check("frame: t2 float BE", "1.5 V", o2[0].Fields[1].Value);
+    var f2bad = (byte[])f2.Clone(); f2bad[^1] = 0x00;
+    var o3 = p2.Push(f2bad, t0);
+    CheckTrue("frame: t2 bad tail flagged", o3.Count >= 1 && !o3[0].Ok && o3[0].Error!.Contains("尾"));
+    // 非法长度
+    var p3 = new FrameParser(t2);
+    var o4 = p3.Push(H("7E 02 00 7E 0F 00"), t0);
+    CheckTrue("frame: invalid length flagged", o4.Count >= 1 && !o4[0].Ok);
+
+    // 固定长度、无长度字段
+    var t3 = new FrameTemplate { Name = "fixed", Header = "5A", HasLength = false, FixedLength = 4, Checksum = ChecksumKind.Xor8, ChecksumFrom = 1,
+        Fields = new() { new FrameField { Name = "v", Offset = 1, Type = FrameFieldType.I16, BigEndian = true } } };
+    CheckTrue("frame: fixed valid", t3.Validate() == null);
+    var o5 = new FrameParser(t3).Push(H("5A FF FE 01"), t0);
+    CheckTrue("frame: fixed-length Xor8 ok", o5.Count == 1 && o5[0].Ok && o5[0].Fields[0].Value == "-2");
+
+    // JSON 持久化
+    var json = FrameTemplateStore.Serialize(new List<FrameTemplate> { tpl, t2 });
+    var back = FrameTemplateStore.Deserialize(json)!;
+    CheckTrue("frame: json round trip", back.Count == 2 && back[1].Checksum == ChecksumKind.ModbusCrc16 && back[1].Fields[1].Type == FrameFieldType.Float && json.Contains("\"Float\""));
+    var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "st-tpl-" + Guid.NewGuid().ToString("N"));
+    System.IO.Directory.CreateDirectory(dir);
+    var tp = FrameTemplateStore.PathIn(dir);
+    var loaded0 = FrameTemplateStore.Load(tp);
+    CheckTrue("frame: missing file -> sample", loaded0.Count == 1 && loaded0[0].Name == tpl.Name);
+    FrameTemplateStore.Save(tp, back);
+    CheckTrue("frame: save/load", FrameTemplateStore.Load(tp).Count == 2);
+    System.IO.Directory.Delete(dir, true);
+}
+
+// =====================================================================
+// v1.4：Modbus 从站
+// =====================================================================
+{
+    byte[] Rtu(string hex) => Checksum.Append(ChecksumKind.ModbusCrc16, H(hex));
+    var model = new ModbusDataModel(100);
+    model.Holding[0] = 0x1234; model.Holding[1] = 0x5678; model.Input[0] = 0x0011;
+    model.Coils[0] = true; model.Coils[2] = true; model.DiscreteInputs[1] = true;
+    var slave = new ModbusSlave(model) { SlaveId = 1 };
+    var now = t0;
+    string? One(string req)
+    {
+        now = now.AddMilliseconds(500);
+        var r = slave.Push(Rtu(req), now);
+        return r.Count == 1 && r[0].Response != null ? Hx(r[0].Response!) : (r.Count == 0 ? "none" : "noresp");
+    }
+    Check("slave FC01", Hx(Rtu("01 01 01 05")), One("01 01 00 00 00 08"));
+    Check("slave FC02", Hx(Rtu("01 02 01 02")), One("01 02 00 00 00 03"));
+    Check("slave FC03", Hx(Rtu("01 03 04 12 34 56 78")), One("01 03 00 00 00 02"));
+    Check("slave FC04", Hx(Rtu("01 04 02 00 11")), One("01 04 00 00 00 01"));
+    Check("slave FC05 echo", Hx(Rtu("01 05 00 05 FF 00")), One("01 05 00 05 FF 00"));
+    CheckTrue("slave FC05 wrote coil", model.Coils[5]);
+    Check("slave FC05 off", Hx(Rtu("01 05 00 05 00 00")), One("01 05 00 05 00 00"));
+    CheckTrue("slave FC05 cleared coil", !model.Coils[5]);
+    Check("slave FC06 echo", Hx(Rtu("01 06 00 0A AB CD")), One("01 06 00 0A AB CD"));
+    CheckTrue("slave FC06 wrote", model.Holding[10] == 0xABCD);
+    Check("slave FC0F", Hx(Rtu("01 0F 00 14 00 0A")), One("01 0F 00 14 00 0A 02 CD 01"));
+    CheckTrue("slave FC0F coils", string.Concat(model.Coils.Skip(20).Take(10).Select(c => c ? '1' : '0')) == "1011001110");
+    Check("slave FC10", Hx(Rtu("01 10 00 1E 00 02")), One("01 10 00 1E 00 02 04 00 0A 01 02"));
+    CheckTrue("slave FC10 regs", model.Holding[30] == 10 && model.Holding[31] == 0x0102);
+    // 异常
+    Check("slave exc 02 (FC03 out of range)", Hx(Rtu("01 83 02")), One("01 03 00 63 00 02"));
+    Check("slave exc 02 (FC01 out of range)", Hx(Rtu("01 81 02")), One("01 01 00 64 00 01"));
+    Check("slave exc 02 (FC06 out of range)", Hx(Rtu("01 86 02")), One("01 06 00 64 00 01"));
+    Check("slave exc 02 (FC10 out of range)", Hx(Rtu("01 90 02")), One("01 10 00 63 00 02 04 00 01 00 02"));
+    Check("slave exc 02 (FC0F out of range)", Hx(Rtu("01 8F 02")), One("01 0F 00 62 00 03 01 07"));
+    Check("slave exc 03 (qty 0)", Hx(Rtu("01 83 03")), One("01 03 00 00 00 00"));
+    Check("slave exc 03 (FC05 bad value)", Hx(Rtu("01 85 03")), One("01 05 00 00 12 34"));
+    Check("slave exc 03 (FC10 byte count)", Hx(Rtu("01 90 03")), One("01 10 00 00 00 02 02 00 01"));
+    Check("slave exc 01 (FC07)", Hx(Rtu("01 87 01")), One("01 07"));
+    CheckTrue("slave exception counter", slave.Exceptions == 9);
+    // 其他站号忽略、广播不应答
+    Check("slave other id ignored", "none", One("02 03 00 00 00 01"));
+    Check("slave broadcast no response", "noresp", One("00 06 00 0B 00 07"));
+    CheckTrue("slave broadcast executed", model.Holding[11] == 7);
+    // CRC 错误 + 拆分
+    now = now.AddMilliseconds(500);
+    var badCrc = Rtu("01 03 00 00 00 01"); badCrc[^1] ^= 0xFF;
+    CheckTrue("slave bad crc no response", slave.Push(badCrc, now).All(x => x.Response == null) && slave.CrcErrors > 0);
+    now = now.AddMilliseconds(500);
+    var req = Rtu("01 03 00 01 00 01");
+    var rA = slave.Push(req.Take(3).ToArray(), now);
+    var rB = slave.Push(req.Skip(3).ToArray(), now.AddMilliseconds(5));
+    CheckTrue("slave split request", rA.Count == 0 && rB.Count == 1 && Hx(rB[0].Response!) == Hx(Rtu("01 03 02 56 78")));
+    // Modbus TCP
+    var tcp = new ModbusSlave(model) { SlaveId = 1, Framing = ModbusFraming.Tcp };
+    var tr = tcp.Push(H("00 07 00 00 00 06 01 03 00 00 00 01"), t0);
+    Check("slave TCP FC03", "00 07 00 00 00 05 01 03 02 12 34", tr.Count == 1 ? Hx(tr[0].Response!) : "none");
+    var te = tcp.Push(H("00 08 00 00 00 06 01 04 00 63 00 05"), t0);
+    Check("slave TCP exception", "00 08 00 00 00 03 01 84 02", te.Count == 1 ? Hx(te[0].Response!) : "none");
+    CheckTrue("slave log written area", slave.Push(Rtu("01 06 00 02 00 09"), now.AddSeconds(1)).Single().Log.WrittenArea == 'H');
+}
+
+// =====================================================================
+// v1.4：XModem / YModem 回环
+// =====================================================================
+{
+    var rnd = new Random(1234);
+    byte[] Rand(int n) { var b = new byte[n]; rnd.NextBytes(b); return b; }
+    (List<TransferFile>? got, string? sendErr, string? recvErr, int retries) Loop(XModemVariant v, List<TransferFile> files, Func<byte[], byte[]>? corrupt = null)
+    {
+        var (a, b) = MemoryLink.CreatePair(corrupt, null);
+        var tx = new XYModem(a) { AckTimeoutMs = 3000, StartTimeoutMs = 10000 };
+        var rx = new XYModem(b) { BlockTimeoutMs = 3000, StartIntervalMs = 500, StartTimeoutMs = 10000 };
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var st = tx.SendAsync(files, v, cts.Token);
+        var rt = rx.ReceiveAsync(v, cts.Token);
+        string? se = null, re = null; List<TransferFile>? got = null;
+        try { st.Wait(); } catch (AggregateException e) { se = e.InnerException!.Message; }
+        try { got = rt.Result; } catch (AggregateException e) { re = e.InnerException!.Message; }
+        return (got, se, re, tx.TotalRetries + rx.TotalRetries);
+    }
+    var d1 = Rand(1000);
+    var x1 = Loop(XModemVariant.XModemChecksum, new() { new TransferFile { Name = "a.bin", Data = d1 } });
+    CheckTrue("xmodem checksum loopback", x1.sendErr == null && x1.recvErr == null && x1.got![0].Data.SequenceEqual(d1));
+    var d2 = Rand(5000).Select(b => b == 0x1A ? (byte)0x1B : b).ToArray(); // XModem 去掉末尾 0x1A 填充
+    var x2 = Loop(XModemVariant.XModemCrc, new() { new TransferFile { Name = "b.bin", Data = d2 } });
+    CheckTrue("xmodem crc loopback", x2.sendErr == null && x2.recvErr == null && x2.got![0].Data.SequenceEqual(d2));
+    var x3 = Loop(XModemVariant.XModem1K, new() { new TransferFile { Name = "c.bin", Data = d2 } });
+    CheckTrue("xmodem-1k loopback", x3.sendErr == null && x3.recvErr == null && x3.got![0].Data.SequenceEqual(d2));
+
+    // 损坏一个数据块 → NAK → 重发成功
+    int writes = 0;
+    byte[] CorruptThird(byte[] d)
+    {
+        if (d.Length > 100 && ++writes == 3) { var c = (byte[])d.Clone(); c[50] ^= 0x55; return c; }
+        return d;
+    }
+    var x4 = Loop(XModemVariant.XModemCrc, new() { new TransferFile { Name = "d.bin", Data = d2 } }, CorruptThird);
+    CheckTrue("xmodem corrupted block retried", x4.sendErr == null && x4.recvErr == null && x4.got![0].Data.SequenceEqual(d2) && x4.retries >= 1);
+    writes = 0;
+    var x4b = Loop(XModemVariant.XModemChecksum, new() { new TransferFile { Name = "d.bin", Data = d1 } }, CorruptThird);
+    CheckTrue("xmodem checksum corrupted block retried", x4b.sendErr == null && x4b.got![0].Data.SequenceEqual(d1) && x4b.retries >= 1);
+
+    // YModem 批量：含 1K 块、短文件、空文件，且其中一块损坏
+    var y1 = Rand(3000); var y2 = Rand(100); var y3 = Array.Empty<byte>();
+    writes = 0;
+    var ys = Loop(XModemVariant.YModem, new()
+    {
+        new TransferFile { Name = "固件.bin", Data = y1 },
+        new TransferFile { Name = "cfg.txt", Data = y2 },
+        new TransferFile { Name = "empty.dat", Data = y3 },
+    }, CorruptThird);
+    CheckTrue("ymodem batch no errors", ys.sendErr == null && ys.recvErr == null);
+    CheckTrue("ymodem batch 3 files", ys.got != null && ys.got.Count == 3);
+    CheckTrue("ymodem names", ys.got != null && ys.got.Select(f => f.Name).SequenceEqual(new[] { "固件.bin", "cfg.txt", "empty.dat" }));
+    CheckTrue("ymodem exact sizes (padding trimmed)", ys.got != null && ys.got[0].Data.SequenceEqual(y1) && ys.got[1].Data.SequenceEqual(y2) && ys.got[2].Data.Length == 0);
+    CheckTrue("ymodem corrupted block retried", ys.retries >= 1);
+
+    // 块构造
+    var blk = XYModem.BuildBlock(1, new byte[128], true);
+    CheckTrue("xmodem block layout", blk.Length == 133 && blk[0] == XYModem.SOH && blk[1] == 1 && blk[2] == 0xFE);
+    CheckTrue("xmodem 1k block STX", XYModem.BuildBlock(2, new byte[1024], true)[0] == XYModem.STX);
+
+    // 取消：接收方未启动时发送方取消
+    {
+        var (a, b) = MemoryLink.CreatePair();
+        var tx = new XYModem(a);
+        using var cts = new CancellationTokenSource(300);
+        bool cancelled = false;
+        try { tx.Send(new List<TransferFile> { new() { Name = "x", Data = d1 } }, XModemVariant.XModemCrc, cts.Token); }
+        catch (OperationCanceledException) { cancelled = true; }
+        var sent = new List<int>(); int bb; while ((bb = b.ReadByte(50, CancellationToken.None)) >= 0) sent.Add(bb);
+        CheckTrue("xmodem cancel sends CAN", cancelled && sent.Count(x => x == XYModem.CAN) >= 2);
+    }
+    // 接收方收到 CAN
+    {
+        var (a, b) = MemoryLink.CreatePair();
+        var rx = new XYModem(b) { StartIntervalMs = 200, StartTimeoutMs = 2000 };
+        a.Write(new byte[] { XYModem.CAN, XYModem.CAN });
+        string? msg = null;
+        try { rx.Receive(XModemVariant.XModemCrc, CancellationToken.None); } catch (TransferException e) { msg = e.Message; }
+        CheckTrue("xmodem receiver handles CAN", msg != null && msg.Contains("取消"));
+    }
+}
+
+// XYModem + 从站经真实 TCP 连接（与主窗口相同的接线：Received → FeedLink / ModbusSlave，发送走 IConnection.Send）
+{
+    var srvT = TcpServerConnection.Listen(0, null);
+    srvT.Start();
+    var cliT = await TcpClientConnection.ConnectAsync("127.0.0.1", srvT.LocalPort, null);
+    cliT.Start();
+    await WaitFor(() => srvT.Clients.Count == 1, 3000);
+    var linkS = new FeedLink(d => srvT.Send(d));
+    var linkC = new FeedLink(d => cliT.Send(d));
+    srvT.Received += linkS.Feed;
+    cliT.Received += linkC.Feed;
+    var ymPayload = new byte[20000]; new Random(7).NextBytes(ymPayload);
+    var sendT = new XYModem(linkS).SendAsync(new List<TransferFile> { new() { Name = "fw.bin", Data = ymPayload } }, XModemVariant.YModem, CancellationToken.None);
+    var recvT = new XYModem(linkC) { StartIntervalMs = 500 }.ReceiveAsync(XModemVariant.YModem, CancellationToken.None);
+    bool fin = Task.WaitAll(new Task[] { sendT, recvT }, 20000);
+    CheckTrue("ymodem over TCP connection", fin && recvT.Result.Count == 1 && recvT.Result[0].Name == "fw.bin" && recvT.Result[0].Data.SequenceEqual(ymPayload));
+    srvT.Received -= linkS.Feed;
+    cliT.Received -= linkC.Feed;
+
+    // Modbus TCP 从站挂在服务器端
+    var mdl = new ModbusDataModel(10); mdl.Holding[3] = 0xBEEF;
+    var sl = new ModbusSlave(mdl) { SlaveId = 1, Framing = ModbusFraming.Tcp };
+    srvT.Received += d => { foreach (var (resp, _) in sl.Push(d, DateTime.Now)) if (resp != null) srvT.Send(resp); };
+    var gotResp = new List<byte>();
+    cliT.Received += d => { lock (gotResp) gotResp.AddRange(d); };
+    cliT.Send(H("12 34 00 00 00 06 01 03 00 03 00 01"));
+    await WaitFor(() => { lock (gotResp) return gotResp.Count >= 11; }, 3000);
+    lock (gotResp) Check("slave over TCP connection", "12 34 00 00 00 05 01 03 02 BE EF", Hx(gotResp.ToArray()));
+    cliT.Stop();
+    srvT.Stop();
+}
+
+// =====================================================================
+// v1.4：录制 / 回放
+// =====================================================================
+{
+    var sw = new System.IO.StringWriter();
+    var rec = new SessionRecorder(sw, "test");
+    rec.Write(false, H("01 02 03"), t0);
+    rec.Write(true, A("AT\r\n"), t0.AddMilliseconds(100), "192.168.1.5:502");
+    rec.Write(false, A("OK\r\n"), t0.AddMilliseconds(200));
+    rec.Write(false, Array.Empty<byte>(), t0.AddMilliseconds(250)); // 空数据忽略
+    rec.Flush();
+    string text = sw.ToString();
+    var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+    CheckTrue("record: header + 3 lines", lines.Length == 4 && lines[0].Contains(SessionRecorder.HeaderType));
+    var entries = SessionReader.Read(new System.IO.StringReader(text + "garbage line\n{\"t\":5,\"dir\":\"rx\",\"hex\":\"ZZ\"}\n"), out int badLines);
+    CheckTrue("record: read back 3 entries", entries.Count == 3);
+    Check("record: bad lines counted", "2", badLines.ToString());
+    CheckTrue("record: round trip data", entries[0].Data.SequenceEqual(H("01 02 03")) && entries[1].IsTx && !entries[2].IsTx
+        && Encoding.ASCII.GetString(entries[2].Data) == "OK\r\n" && entries[1].Source == "192.168.1.5:502");
+    CheckTrue("record: offsets", Math.Abs(entries[1].OffsetMs - 100) < 0.01 && Math.Abs(entries[2].OffsetMs - 200) < 0.01);
+
+    var outList = new List<RecordEntry>();
+    var rp = new SessionReplayer(entries) { Speed = 0 };
+    var swt = System.Diagnostics.Stopwatch.StartNew();
+    rp.Run(e => outList.Add(e), null, CancellationToken.None);
+    CheckTrue("replay: max speed delivers all quickly", outList.Count == 3 && swt.ElapsedMilliseconds < 100);
+    CheckTrue("replay: payload identical", outList.Select(e => e.Hex).SequenceEqual(entries.Select(e => e.Hex)));
+
+    outList.Clear();
+    var rp1 = new SessionReplayer(entries) { Speed = 1 };
+    swt.Restart();
+    rp1.Run(e => outList.Add(e), null, CancellationToken.None);
+    long el1 = swt.ElapsedMilliseconds;
+    CheckTrue($"replay: 1x keeps timing ({el1} ms)", el1 >= 190 && el1 < 600);
+
+    var rp2 = new SessionReplayer(entries) { Speed = 2 };
+    swt.Restart();
+    rp2.Run(_ => { }, null, CancellationToken.None);
+    long el2 = swt.ElapsedMilliseconds;
+    CheckTrue($"replay: 2x halves timing ({el2} ms)", el2 >= 90 && el2 < 400);
+
+    var rph = new SessionReplayer(entries) { Speed = 0.5 };
+    swt.Restart();
+    rph.Run(_ => { }, null, CancellationToken.None);
+    long elh = swt.ElapsedMilliseconds;
+    CheckTrue($"replay: 0.5x doubles timing ({elh} ms)", elh >= 390 && elh < 900);
+
+    // 过滤（仅 RX）+ 暂停/继续 + 停止
+    var rxOnly = new List<RecordEntry>();
+    var rpp = new SessionReplayer(entries) { Speed = 1, Filter = e => !e.IsTx };
+    rpp.Pause();
+    swt.Restart();
+    var task = rpp.RunAsync(e => { lock (rxOnly) rxOnly.Add(e); }, null, CancellationToken.None);
+    Thread.Sleep(300);
+    int duringPause; lock (rxOnly) duringPause = rxOnly.Count;
+    rpp.Resume();
+    task.Wait();
+    CheckTrue("replay: paused delivers nothing", duringPause == 0);
+    CheckTrue("replay: filter rx only", rxOnly.Count == 2 && rxOnly.All(e => !e.IsTx));
+    CheckTrue("replay: pause extends time", swt.ElapsedMilliseconds >= 480);
+
+    using var stop = new CancellationTokenSource(50);
+    bool stopped = false;
+    try { new SessionReplayer(entries) { Speed = 1 }.Run(_ => { }, null, stop.Token); } catch (OperationCanceledException) { stopped = true; }
+    CheckTrue("replay: stop cancels", stopped);
+
+    var fpath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "st-rec-" + Guid.NewGuid().ToString("N") + ".jsonl");
+    using (var fr = SessionRecorder.Create(fpath)) { fr.Write(false, Encoding.UTF8.GetBytes("中文 hi"), t0); }
+    var fe = SessionReader.ReadFile(fpath, out _);
+    CheckTrue("record: file round trip", fe.Count == 1 && Encoding.UTF8.GetString(fe[0].Data) == "中文 hi");
+    System.IO.File.Delete(fpath);
+}
+
+// =====================================================================
+// v1.4：波特率识别
+// =====================================================================
+{
+    var good = BaudScorer.Score(115200, A("Hello from device v1.2\r\nTemp=25.3 Hum=45\r\nOK\r\n"));
+    var garbage = BaudScorer.Score(9600, H("00 FF 00 F8 80 00 FF FE 00 00 E0 FF 00 80 F0 00 FF 00"));
+    var binary = BaudScorer.Score(19200, H("8C 13 91 E7 05 B2 7F 03 99 C1 11 A4 06 D8 3E 02"));
+    var cn = BaudScorer.Score(57600, Encoding.UTF8.GetBytes("设备启动完成，版本 1.0\r\n"));
+    CheckTrue($"baud: text scores high ({good.Score})", good.Score >= 80);
+    CheckTrue($"baud: 00/FF garbage scores low ({garbage.Score})", garbage.Score < 20);
+    CheckTrue($"baud: random binary scores low ({binary.Score})", binary.Score < 40);
+    CheckTrue($"baud: UTF-8 Chinese text acceptable ({cn.Score})", cn.Score >= 60);
+    CheckTrue("baud: empty scores 0", BaudScorer.Score(1200, Array.Empty<byte>()).Score == 0);
+    CheckTrue("baud: tiny sample discounted", BaudScorer.Score(1200, A("ok")).Score < good.Score);
+    CheckTrue("baud: 12 standard rates 1200..921600", BaudScorer.StandardRates.Length == 12 && BaudScorer.StandardRates[0] == 1200 && BaudScorer.StandardRates[^1] == 921600);
+
+    var probeSeen = new List<int>();
+    var results = BaudDetector.RunAsync((baud, ct) =>
+    {
+        probeSeen.Add(baud);
+        if (baud == 38400) throw new InvalidOperationException("busy");
+        byte[] d = baud == 115200 ? A("AT\r\nOK\r\n+VER:1.0\r\n") : baud == 57600 ? H("41 00 FF 4B 0A") : H("00 FF 80 00 FE FF 00 F0");
+        return Task.FromResult(d);
+    }, BaudScorer.StandardRates, null, CancellationToken.None).Result;
+    CheckTrue("baud: detector tried all", probeSeen.Count == 12 && results.Count == 12);
+    Check("baud: best rate", "115200", BaudScorer.Best(results)?.Baud.ToString() ?? "none");
+    CheckTrue("baud: sampler error reported", results.First(r => r.Baud == 38400).Note.Contains("失败"));
+    CheckTrue("baud: no good rate -> null", BaudScorer.Best(results.Where(r => r.Baud != 115200)) == null);
+}
+
 Console.WriteLine($"\n结果：{pass} 通过，{fail} 失败");
 return fail == 0 ? 0 : 1;
 

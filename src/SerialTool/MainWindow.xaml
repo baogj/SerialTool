@@ -77,10 +77,18 @@
                                 </Grid>
 
                                 <TextBlock Grid.Row="1" Text="波特率" Style="{StaticResource FieldLabel}"/>
-                                <ComboBox x:Name="BaudCombo" Grid.Row="1" Grid.Column="1" IsEditable="True" IsTextSearchEnabled="False"
-                                          ToolTip="可直接输入自定义波特率，回车生效"
-                                          SelectionChanged="BaudCombo_SelectionChanged" LostFocus="BaudCombo_LostFocus"
-                                          PreviewKeyDown="BaudCombo_PreviewKeyDown"/>
+                                <Grid Grid.Row="1" Grid.Column="1">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ComboBox x:Name="BaudCombo" IsEditable="True" IsTextSearchEnabled="False"
+                                              ToolTip="可直接输入自定义波特率，回车生效"
+                                              SelectionChanged="BaudCombo_SelectionChanged" LostFocus="BaudCombo_LostFocus"
+                                              PreviewKeyDown="BaudCombo_PreviewKeyDown"/>
+                                    <Button x:Name="BaudDetectBtn" Grid.Column="1" Content="识别" Style="{StaticResource SmallButton}"
+                                            Margin="4,3,0,3" ToolTip="在所选串口上自动识别波特率（1200 ~ 921600）" Click="BaudDetect_Click"/>
+                                </Grid>
 
                                 <TextBlock Grid.Row="2" Text="数据位" Style="{StaticResource FieldLabel}"/>
                                 <ComboBox x:Name="DataBitsCombo" Grid.Row="2" Grid.Column="1" SelectionChanged="PortParam_Changed"/>
@@ -677,6 +685,253 @@
                                     </Border>
                                 </StackPanel>
                             </Grid>
+                        </TabItem>
+
+                        <!-- v1.4：扩展工具 -->
+                        <TabItem Header="扩展工具" x:Name="ToolsTab">
+                            <TabControl x:Name="ToolTabs" Background="{DynamicResource RxBgBrush}" BorderThickness="0" Padding="0">
+                                <TabControl.Resources>
+                                    <Style TargetType="TabItem" BasedOn="{StaticResource ThemedTabItem}"/>
+                                </TabControl.Resources>
+
+                                <!-- 帧解析 -->
+                                <TabItem Header="帧解析">
+                                    <Grid Background="{DynamicResource RxBgBrush}">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*"/>
+                                        </Grid.RowDefinitions>
+                                        <Border Background="{DynamicResource RxHeaderBgBrush}" Padding="10,5">
+                                            <DockPanel>
+                                                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                                                    <TextBlock x:Name="FrameStatsText" Text="正确 0  错误 0  丢弃 0 字节" Foreground="{DynamicResource RxHeaderFgBrush}"
+                                                               FontFamily="{StaticResource MonoFont}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                                    <Button Content="导出 CSV…" Style="{StaticResource PanelButton}" Margin="0,0,6,0" Click="FrameExport_Click"/>
+                                                    <Button Content="清空" Style="{StaticResource PanelButton}" Click="FrameClear_Click"/>
+                                                </StackPanel>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <CheckBox x:Name="FrameEnableChk" Content="启用解析" Foreground="{DynamicResource RxHeaderFgBrush}"
+                                                              VerticalAlignment="Center" Margin="0,0,12,0" Click="FrameOption_Click"/>
+                                                    <TextBlock Text="模板" Foreground="{DynamicResource RxHeaderFgBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                    <ComboBox x:Name="FrameTplCombo" Width="210" Height="24" Margin="0" SelectionChanged="FrameTpl_Changed"
+                                                              DisplayMemberPath="Name"/>
+                                                    <Button Content="编辑模板…" Style="{StaticResource PanelButton}" Margin="6,0,12,0" Click="FrameEdit_Click"/>
+                                                    <CheckBox x:Name="FrameTxChk" Content="含发送" Foreground="{DynamicResource RxHeaderFgBrush}"
+                                                              VerticalAlignment="Center" Margin="0,0,10,0" Click="FrameOption_Click"/>
+                                                    <CheckBox x:Name="FrameBadOnlyChk" Content="只看错误帧" Foreground="{DynamicResource RxHeaderFgBrush}"
+                                                              VerticalAlignment="Center" Click="FrameBadOnly_Click"/>
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+                                        <TextBlock x:Name="FrameInfoText" Grid.Row="1" Style="{StaticResource MutedText}" Margin="10,4" TextWrapping="Wrap"
+                                                   FontFamily="{StaticResource MonoFont}"/>
+                                        <DataGrid x:Name="FrameGrid" Grid.Row="2" Margin="10,0,10,8" AutoGenerateColumns="False" IsReadOnly="True"
+                                                  CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column"
+                                                  EnableRowVirtualization="True" EnableColumnVirtualization="True" FontFamily="{StaticResource MonoFont}">
+                                            <DataGrid.RowStyle>
+                                                <Style TargetType="DataGridRow">
+                                                    <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Ok}" Value="False">
+                                                            <Setter Property="Foreground" Value="{DynamicResource DangerBrush}"/>
+                                                            <Setter Property="FontWeight" Value="SemiBold"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </DataGrid.RowStyle>
+                                        </DataGrid>
+                                    </Grid>
+                                </TabItem>
+
+                                <!-- Modbus 从站 -->
+                                <TabItem Header="Modbus 从站">
+                                    <Grid Background="{DynamicResource RxBgBrush}">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*"/>
+                                        </Grid.RowDefinitions>
+                                        <Border Background="{DynamicResource RxHeaderBgBrush}" Padding="10,5">
+                                            <DockPanel>
+                                                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                                                    <TextBlock x:Name="SlaveStatsText" Text="请求 0  异常 0  CRC错 0" Foreground="{DynamicResource RxHeaderFgBrush}"
+                                                               FontFamily="{StaticResource MonoFont}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                                    <Button Content="清空日志" Style="{StaticResource PanelButton}" Click="SlaveClearLog_Click"/>
+                                                </StackPanel>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <CheckBox x:Name="SlaveEnableChk" Content="启用从站模拟" Foreground="{DynamicResource RxHeaderFgBrush}"
+                                                              FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,14,0" Click="SlaveEnable_Click"
+                                                              ToolTip="启用后，主连接收到发给本站的请求会自动应答（串口、TCP、UDP 均可）"/>
+                                                    <TextBlock Text="站号" Foreground="{DynamicResource RxHeaderFgBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                    <TextBox x:Name="SlaveIdBox" Width="44" Height="24" Style="{StaticResource FieldBox}" Margin="0,0,12,0"
+                                                             LostFocus="SlaveOption_Changed" ToolTip="1~247；0 号广播请求只执行不应答"/>
+                                                    <TextBlock Text="帧格式" Foreground="{DynamicResource RxHeaderFgBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                    <ComboBox x:Name="SlaveFramingCombo" Width="120" Height="24" Margin="0,0,12,0" SelectionChanged="SlaveOption_Changed"/>
+                                                    <TextBlock Text="表大小" Foreground="{DynamicResource RxHeaderFgBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                    <TextBox x:Name="SlaveSizeBox" Width="56" Height="24" Style="{StaticResource FieldBox}" Margin="0,0,4,0"
+                                                             ToolTip="地址 0 ~ (表大小-1) 有效，超出范围返回异常码 02；最大 10000"/>
+                                                    <Button Content="应用" Style="{StaticResource PanelButton}" Margin="0,0,8,0" Click="SlaveResize_Click"/>
+                                                    <Button Content="全部清零" Style="{StaticResource PanelButton}" Click="SlaveZero_Click"/>
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+                                        <TextBlock Grid.Row="1" Style="{StaticResource MutedText}" Margin="10,4" TextWrapping="Wrap"
+                                                   Text="支持功能码 01/02/03/04/05/06/0F/10。表格可直接编辑（寄存器支持十进制、0x 十六进制、负数）；主站写入后表格自动刷新。非法地址返回异常 02，非法数量/数值返回 03，不支持的功能码返回 01。"/>
+                                        <Grid Grid.Row="2" Margin="10,0,10,8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="440"/>
+                                                <ColumnDefinition Width="8"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <DataGrid x:Name="SlaveGrid" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
+                                                      CanUserSortColumns="False" HeadersVisibility="Column" SelectionUnit="Cell"
+                                                      EnableRowVirtualization="True" FontFamily="{StaticResource MonoFont}">
+                                                <DataGrid.Columns>
+                                                    <DataGridTextColumn Header="地址" Binding="{Binding Address}" IsReadOnly="True" Width="56"/>
+                                                    <DataGridTextColumn Header="保持寄存器" Binding="{Binding HoldingText, UpdateSourceTrigger=LostFocus}" Width="96"/>
+                                                    <DataGridTextColumn Header="输入寄存器" Binding="{Binding InputText, UpdateSourceTrigger=LostFocus}" Width="96"/>
+                                                    <DataGridCheckBoxColumn Header="线圈" Binding="{Binding Coil, UpdateSourceTrigger=PropertyChanged}" Width="60"/>
+                                                    <DataGridCheckBoxColumn Header="离散输入" Binding="{Binding Discrete, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                                                </DataGrid.Columns>
+                                            </DataGrid>
+                                            <GridSplitter Grid.Column="1" Width="8" HorizontalAlignment="Stretch" Background="Transparent" ResizeBehavior="PreviousAndNext"/>
+                                            <DataGrid x:Name="SlaveLogGrid" Grid.Column="2" AutoGenerateColumns="False" IsReadOnly="True"
+                                                      CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column"
+                                                      EnableRowVirtualization="True" FontFamily="{StaticResource MonoFont}">
+                                                <DataGrid.RowStyle>
+                                                    <Style TargetType="DataGridRow">
+                                                        <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsError}" Value="True">
+                                                                <Setter Property="Foreground" Value="{DynamicResource DangerBrush}"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </DataGrid.RowStyle>
+                                                <DataGrid.Columns>
+                                                    <DataGridTextColumn Header="时间" Binding="{Binding TimeText}" Width="96"/>
+                                                    <DataGridTextColumn Header="站" Binding="{Binding Slave}" Width="36"/>
+                                                    <DataGridTextColumn Header="说明" Binding="{Binding Summary}" Width="220"/>
+                                                    <DataGridTextColumn Header="请求" Binding="{Binding Request}" Width="200"/>
+                                                    <DataGridTextColumn Header="应答" Binding="{Binding Response}" Width="*"/>
+                                                </DataGrid.Columns>
+                                            </DataGrid>
+                                        </Grid>
+                                    </Grid>
+                                </TabItem>
+
+                                <!-- 文件传输 -->
+                                <TabItem Header="文件传输">
+                                    <Grid Background="{DynamicResource RxBgBrush}">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*"/>
+                                        </Grid.RowDefinitions>
+                                        <Border Background="{DynamicResource RxHeaderBgBrush}" Padding="10,5">
+                                            <TextBlock Text="文件传输（XModem / XModem-1K / YModem，通过当前主连接）" Foreground="{DynamicResource RxHeaderFgBrush}" FontWeight="SemiBold"/>
+                                        </Border>
+                                        <StackPanel Grid.Row="1" Margin="14,8" MaxWidth="760" HorizontalAlignment="Left">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="78"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto"/>
+                                                    <RowDefinition Height="Auto"/>
+                                                    <RowDefinition Height="Auto"/>
+                                                </Grid.RowDefinitions>
+                                                <TextBlock Text="协议" Style="{StaticResource FieldLabel}"/>
+                                                <ComboBox x:Name="XferProtoCombo" Grid.Column="1" Width="260" HorizontalAlignment="Left" Margin="0,3"/>
+                                                <TextBlock Grid.Row="1" Text="发送文件" Style="{StaticResource FieldLabel}"/>
+                                                <TextBox x:Name="XferFilesBox" Grid.Row="1" Grid.Column="1" Style="{StaticResource FieldBox}" Margin="0,3" IsReadOnly="True"
+                                                         ToolTip="YModem 可选择多个文件（批量发送）；XModem 只能一个"/>
+                                                <Button Grid.Row="1" Grid.Column="2" Content="选择文件…" Style="{StaticResource SmallButton}" Margin="6,3,0,3" Click="XferPickFiles_Click"/>
+                                                <TextBlock Grid.Row="2" Text="接收目录" Style="{StaticResource FieldLabel}"/>
+                                                <TextBox x:Name="XferDirBox" Grid.Row="2" Grid.Column="1" Style="{StaticResource FieldBox}" Margin="0,3"
+                                                         ToolTip="接收的文件保存到此目录；XModem 没有文件名，按时间自动命名；同名文件自动加序号"/>
+                                                <Button Grid.Row="2" Grid.Column="2" Content="浏览…" Style="{StaticResource SmallButton}" Margin="6,3,0,3" Click="XferPickDir_Click"/>
+                                            </Grid>
+                                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                                <Button x:Name="XferSendBtn" Content="发送" Style="{StaticResource AccentButton}" Padding="20,4" Click="XferSend_Click"/>
+                                                <Button x:Name="XferRecvBtn" Content="接收" Style="{StaticResource AccentButton}" Padding="20,4" Margin="8,0,0,0" Click="XferRecv_Click"/>
+                                                <Button x:Name="XferCancelBtn" Content="取消" Style="{StaticResource DangerButton}" Padding="20,4" Margin="8,0,0,0"
+                                                        IsEnabled="False" Click="XferCancel_Click"/>
+                                                <TextBlock x:Name="XferStatusText" Text="空闲" VerticalAlignment="Center" Margin="14,0,0,0"/>
+                                            </StackPanel>
+                                            <ProgressBar x:Name="XferProgress" Height="16" Margin="0,8,0,0" Minimum="0" Maximum="100"
+                                                         Foreground="{DynamicResource AccentBrush}" Background="{DynamicResource TabBgBrush}" BorderThickness="0"/>
+                                            <TextBlock Style="{StaticResource MutedText}" Margin="0,6,0,0" TextWrapping="Wrap"
+                                                       Text="传输期间暂停接收区显示、自动回复、Modbus 从站和串口转发，结束后自动恢复。每块最多重试 10 次，取消时发送 CAN×5 通知对方。"/>
+                                        </StackPanel>
+                                        <TextBox x:Name="XferLogBox" Grid.Row="2" Margin="14,0,14,8" IsReadOnly="True" VerticalScrollBarVisibility="Auto"
+                                                 TextWrapping="Wrap" FontFamily="{StaticResource MonoFont}" Style="{StaticResource FieldBox}"
+                                                 VerticalContentAlignment="Top" AcceptsReturn="True"/>
+                                    </Grid>
+                                </TabItem>
+
+                                <!-- 录制回放 -->
+                                <TabItem Header="录制回放">
+                                    <Grid Background="{DynamicResource RxBgBrush}">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*"/>
+                                        </Grid.RowDefinitions>
+                                        <Border Background="{DynamicResource RxHeaderBgBrush}" Padding="10,5">
+                                            <TextBlock Text="会话录制 / 回放（.jsonl，每行一条带时间戳的收发记录）" Foreground="{DynamicResource RxHeaderFgBrush}" FontWeight="SemiBold"/>
+                                        </Border>
+                                        <StackPanel Grid.Row="1" Margin="14,8" MaxWidth="760" HorizontalAlignment="Left">
+                                            <TextBlock Text="录制" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                            <StackPanel Orientation="Horizontal">
+                                                <Button x:Name="RecBtn" Content="开始录制…" Style="{StaticResource AccentButton}" Padding="18,4" Click="Rec_Click"/>
+                                                <Ellipse x:Name="RecDot" Width="9" Height="9" Fill="#9CA3AF" Margin="12,0,6,0" VerticalAlignment="Center"/>
+                                                <TextBlock x:Name="RecStatusText" Text="未录制" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="560"/>
+                                            </StackPanel>
+                                            <TextBlock Style="{StaticResource MutedText}" Margin="0,4,0,14" TextWrapping="Wrap"
+                                                       Text="录制主连接的所有接收(RX)与发送(TX)数据，包括时间戳与网络来源地址。"/>
+
+                                            <TextBlock Text="回放" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="78"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto"/>
+                                                    <RowDefinition Height="Auto"/>
+                                                </Grid.RowDefinitions>
+                                                <TextBlock Text="录制文件" Style="{StaticResource FieldLabel}"/>
+                                                <TextBox x:Name="ReplayFileBox" Grid.Column="1" Style="{StaticResource FieldBox}" Margin="0,3" IsReadOnly="True"/>
+                                                <Button Grid.Column="2" Content="打开…" Style="{StaticResource SmallButton}" Margin="6,3,0,3" Click="ReplayOpen_Click"/>
+                                                <WrapPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,3">
+                                                    <TextBlock Text="回放到" Style="{StaticResource FieldLabel}"/>
+                                                    <ComboBox x:Name="ReplayTargetCombo" Width="150" Margin="0,3,12,3"/>
+                                                    <TextBlock Text="内容" Style="{StaticResource FieldLabel}"/>
+                                                    <ComboBox x:Name="ReplayContentCombo" Width="120" Margin="0,3,12,3"/>
+                                                    <TextBlock Text="速度" Style="{StaticResource FieldLabel}"/>
+                                                    <ComboBox x:Name="ReplaySpeedCombo" Width="110" Margin="0,3,0,3" SelectionChanged="ReplaySpeed_Changed"/>
+                                                </WrapPanel>
+                                            </Grid>
+                                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                                <Button x:Name="ReplayBtn" Content="开始回放" Style="{StaticResource AccentButton}" Padding="18,4" Click="ReplayStart_Click"/>
+                                                <Button x:Name="ReplayPauseBtn" Content="暂停" Style="{StaticResource SmallButton}" Padding="18,4" Margin="8,0,0,0"
+                                                        IsEnabled="False" Click="ReplayPause_Click"/>
+                                                <Button x:Name="ReplayStopBtn" Content="停止" Style="{StaticResource DangerButton}" Padding="18,4" Margin="8,0,0,0"
+                                                        IsEnabled="False" Click="ReplayStop_Click"/>
+                                                <TextBlock x:Name="ReplayStatusText" Text="未加载" VerticalAlignment="Center" Margin="14,0,0,0"/>
+                                            </StackPanel>
+                                            <ProgressBar x:Name="ReplayProgress" Height="14" Margin="0,8,0,0" Minimum="0" Maximum="100"
+                                                         Foreground="{DynamicResource AccentBrush}" Background="{DynamicResource TabBgBrush}" BorderThickness="0"/>
+                                            <TextBlock Style="{StaticResource MutedText}" Margin="0,6,0,0" TextWrapping="Wrap"
+                                                       Text="“接收区”：把记录按原方向显示在接收区（同时经过协议解析、帧解析、波形等，不触发自动回复）；“主连接发送”：把选中的记录从当前串口/网络发出（常用于把录下的设备输出 RX 重新发给上位机）。速度可在回放中切换。"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </TabItem>
+                            </TabControl>
                         </TabItem>
                     </TabControl>
                 </Border>

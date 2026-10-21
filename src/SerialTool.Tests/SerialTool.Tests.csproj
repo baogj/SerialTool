@@ -17,6 +17,11 @@
     <Compile Include="../SerialTool/Features/TextTools.cs" Link="Linked/TextTools.cs" />
     <Compile Include="../SerialTool/Connections/ConnectionBase.cs" Link="Linked/ConnectionBase.cs" />
     <Compile Include="../SerialTool/Connections/NetConnections.cs" Link="Linked/NetConnections.cs" />
+    <Compile Include="../SerialTool/Features/FrameTemplate.cs" Link="Linked/FrameTemplate.cs" />
+    <Compile Include="../SerialTool/Features/ModbusSlave.cs" Link="Linked/ModbusSlave.cs" />
+    <Compile Include="../SerialTool/Features/XYModem.cs" Link="Linked/XYModem.cs" />
+    <Compile Include="../SerialTool/Features/SessionRecorder.cs" Link="Linked/SessionRecorder.cs" />
+    <Compile Include="../SerialTool/Features/BaudDetect.cs" Link="Linked/BaudDetect.cs" />
     <Compile Include="../SerialTool/SerialSession.cs" Link="Linked/SerialSession.cs" />
   </ItemGroup>
   <ItemGroup>
