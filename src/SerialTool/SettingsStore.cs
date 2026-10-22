@@ -116,6 +116,9 @@ public static class SettingsStore
         s.Gateway.RemoteHost ??= "127.0.0.1";
         s.Gateway.SessionId ??= "";
         if (s.Gateway.TimeoutMs < 50 || s.Gateway.TimeoutMs > 60000) s.Gateway.TimeoutMs = 1000;
+        s.MultiSendItems ??= new List<SerialTool.Features.MultiSendItem>();
+        s.MultiSendItems.RemoveAll(x => x == null);
+        foreach (var it in s.MultiSendItems) it.Normalize();
         AppSettings.MigrateSessions(s);
         foreach (var r in s.HighlightRules)
         {

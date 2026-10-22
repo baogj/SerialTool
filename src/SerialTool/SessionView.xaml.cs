@@ -43,6 +43,9 @@ public partial class SessionView : UserControl, ScriptEngine.IHost
     private bool _loading = true;
     private bool _busy;
     private bool _disposed;
+    private readonly System.Collections.ObjectModel.ObservableCollection<MultiSendRow> _msRows = new();
+    private readonly MultiSendEngine _msEngine = new();
+    private bool _msBusy;
 
     public SessionView(SessionSettings settings)
     {
@@ -65,6 +68,7 @@ public partial class SessionView : UserControl, ScriptEngine.IHost
         LineList.ItemsSource = _lines;
         LoadSettings(settings);
         RefreshPorts();
+        InitMultiSend(settings);
 
         _dsl = new ScriptEngine(this);
         _dsl.Output += m => Dispatcher.BeginInvoke(() => AppendScriptOut(m));
@@ -176,6 +180,9 @@ public partial class SessionView : UserControl, ScriptEngine.IHost
         s.ScriptText = _lang == "Lua" ? _luaText : _dslText;
         s.LuaScriptText = _luaText;
         s.DslScriptText = _dslText;
+        CommitMs();
+        s.MultiSendItems = _msRows.Select(r => r.Item.Clone()).ToList();
+        s.MultiSendLoop = MsLoopChk.IsChecked == true;
         return s;
     }
 
@@ -700,6 +707,106 @@ public partial class SessionView : UserControl, ScriptEngine.IHost
     // 关闭
     // ------------------------------------------------------------------
 
+
+    // ------------------------------------------------------------------
+    // 多项发送
+    // ------------------------------------------------------------------
+
+    private void InitMultiSend(SessionSettings settings)
+    {
+        MsGrid.ItemsSource = _msRows;
+        _msRows.Clear();
+        var items = settings.MultiSendItems;
+        if (items == null || items.Count == 0)
+            items = new System.Collections.Generic.List<MultiSendItem> { new() { Name = "条目 1", Content = "AT\\r\\n", DelayMs = 200 } };
+        foreach (var it in items) { it.Normalize(); _msRows.Add(new MultiSendRow(it.Clone())); }
+        ReindexMs();
+        MsLoopChk.IsChecked = settings.MultiSendLoop;
+        _msEngine.StateChanged += st => Dispatcher.BeginInvoke(() => UpdateMsButtons(st));
+        _msEngine.CurrentChanged += idx => Dispatcher.BeginInvoke(() =>
+        {
+            for (int i = 0; i < _msRows.Count; i++) _msRows[i].IsCurrent = i == idx;
+            if (idx >= 0 && idx < _msRows.Count) MsGrid.ScrollIntoView(_msRows[idx]);
+        });
+        _msEngine.Finished += err => Dispatcher.BeginInvoke(() =>
+        {
+            for (int i = 0; i < _msRows.Count; i++) _msRows[i].IsCurrent = false;
+            UpdateMsButtons(MultiSendState.Idle);
+            RaiseStatus(err != null ? "多项发送中止：" + err : $"多项发送结束（{_msEngine.SendsCompleted} 条）", err != null);
+        });
+    }
+
+    private void ReindexMs() { for (int i = 0; i < _msRows.Count; i++) _msRows[i].Index = i + 1; }
+    private void CommitMs()
+    {
+        try { MsGrid.CommitEdit(DataGridEditingUnit.Cell, true); MsGrid.CommitEdit(DataGridEditingUnit.Row, true); } catch { }
+    }
+
+    private void UpdateMsButtons(MultiSendState st)
+    {
+        bool idle = st == MultiSendState.Idle;
+        MsStartBtn.IsEnabled = idle;
+        MsPauseBtn.IsEnabled = !idle;
+        MsPauseBtn.Content = st == MultiSendState.Paused ? "继续" : "暂停";
+        MsStopBtn.IsEnabled = !idle;
+        MsGrid.IsReadOnly = !idle;
+        MsLoopChk.IsEnabled = idle;
+        _msBusy = !idle;
+        MsStatusText.Text = st == MultiSendState.Running ? "发送中…" : st == MultiSendState.Paused ? "已暂停" : "";
+    }
+
+    private void MsAdd_Click(object sender, RoutedEventArgs e)
+    {
+        if (_msBusy) return;
+        var row = new MultiSendRow(new MultiSendItem { Name = $"条目 {_msRows.Count + 1}", DelayMs = 100 });
+        _msRows.Add(row); ReindexMs(); MsGrid.SelectedItem = row;
+    }
+
+    private void MsRemove_Click(object sender, RoutedEventArgs e)
+    {
+        if (_msBusy || MsGrid.SelectedItem is not MultiSendRow r) return;
+        _msRows.Remove(r); ReindexMs();
+    }
+
+    private async void MsStart_Click(object sender, RoutedEventArgs e)
+    {
+        if (_msEngine.IsBusy) return;
+        if (!Core.IsOpen) { RaiseStatus("请先打开本会话的连接", true); return; }
+        CommitMs();
+        var items = _msRows.Select(r => r.Item.Clone()).ToList();
+        if (!items.Any(x => x.Enabled && !string.IsNullOrEmpty(x.Content))) { RaiseStatus("请勾选有内容的条目", true); return; }
+        StopTimer();
+        UpdateMsButtons(MultiSendState.Running);
+        try
+        {
+            await _msEngine.StartAsync(items, MsLoopChk.IsChecked == true, item =>
+            {
+                string? err = null;
+                bool ok = Dispatcher.Invoke(() =>
+                {
+                    CollectSettings();
+                    var kind = SessionCore.ParseChecksum(item.Checksum);
+                    if (!SessionCore.BuildPayload(item.Content, item.Hex, Core.Settings.Escape, kind, Core.Settings.LineEnding,
+                            CurrentEncoding(), out var data, out _, out _, out err)) return false;
+                    if (data.Length == 0) { err = "发送内容为空"; return false; }
+                    if (!Core.SendRaw(data)) { err = Core.IsOpen ? "发送队列已满" : "会话未连接"; return false; }
+                    return true;
+                });
+                return ok ? null : (err ?? "发送失败");
+            });
+        }
+        catch (Exception ex) { RaiseStatus("多项发送失败：" + ex.Message, true); UpdateMsButtons(MultiSendState.Idle); }
+    }
+
+    private void MsPause_Click(object sender, RoutedEventArgs e)
+    {
+        if (_msEngine.State == MultiSendState.Paused) _msEngine.Resume();
+        else if (_msEngine.State == MultiSendState.Running) _msEngine.Pause();
+    }
+
+    private void MsStop_Click(object sender, RoutedEventArgs e) => _msEngine.Stop();
+
+
     private void StopUiParts()
     {
         _disposed = true;
@@ -707,6 +814,7 @@ public partial class SessionView : UserControl, ScriptEngine.IHost
         _sendTimer.Stop();
         try { _dsl?.Stop(); } catch { /* ignore */ }
         try { _lua?.Stop(); } catch { /* ignore */ }
+        try { _msEngine.Stop(); } catch { /* ignore */ }
         StopRecording("录制已停止");
     }
 

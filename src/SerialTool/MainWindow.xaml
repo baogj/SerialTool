@@ -267,7 +267,7 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*" MinHeight="160"/>
                     <RowDefinition Height="8"/>
-                    <RowDefinition x:Name="SendRow" Height="250" MinHeight="170"/>
+                    <RowDefinition x:Name="SendRow" Height="280" MinHeight="200"/>
                 </Grid.RowDefinitions>
 
                 <!-- 接收 / 波形 / 脚本 -->
@@ -1096,56 +1096,108 @@
                               Background="Transparent" ResizeDirection="Rows" ResizeBehavior="PreviousAndNext"
                               ShowsPreview="False" Cursor="SizeNS"/>
 
-                <!-- 发送区 -->
-                <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
-                        </Grid.RowDefinitions>
-
-                        <DockPanel Margin="0,0,0,4">
-                            <Button DockPanel.Dock="Right" Content="编辑快捷指令…" Style="{StaticResource SmallButton}"
-                                    VerticalAlignment="Top" Margin="6,0,0,0" Click="EditQuick_Click"/>
-                            <TextBlock Text="快捷指令" Style="{StaticResource FieldLabel}" VerticalAlignment="Top" Margin="0,4,10,0"/>
-                            <WrapPanel x:Name="QuickPanel"/>
-                        </DockPanel>
-
-                        <DockPanel Grid.Row="1" Margin="0,2,0,6">
-                            <TextBlock Text="发送区" Style="{StaticResource CardTitle}" Margin="0,0,14,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="历史" Style="{StaticResource FieldLabel}"/>
-                            <ComboBox x:Name="HistoryCombo" Width="300" Margin="0" SelectionChanged="HistoryCombo_SelectionChanged"
-                                      ToolTip="选择一条历史记录填入发送区">
-                                <ComboBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding Display}" MaxWidth="520" TextTrimming="CharacterEllipsis"
-                                                   FontFamily="{StaticResource MonoFont}"/>
-                                    </DataTemplate>
-                                </ComboBox.ItemTemplate>
-                            </ComboBox>
-                            <Button Content="清除历史" Style="{StaticResource SmallButton}" Margin="6,0,0,0" Click="ClearHistory_Click"/>
-                            <TextBlock Text="Ctrl+Enter 发送" Style="{StaticResource MutedText}" HorizontalAlignment="Right"/>
-                        </DockPanel>
-
-                        <Grid Grid.Row="2">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="112"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBox x:Name="SendBox" AcceptsReturn="True" AcceptsTab="False" TextWrapping="Wrap"
-                                     VerticalScrollBarVisibility="Auto" FontFamily="{StaticResource MonoFont}" FontSize="13"
-                                     Padding="6,4" VerticalContentAlignment="Top"
-                                     PreviewKeyDown="SendBox_PreviewKeyDown" TextChanged="SendBox_TextChanged"/>
-                            <StackPanel Grid.Column="1" Margin="8,0,0,0">
-                                <Button x:Name="SendBtn" Content="发送" Style="{StaticResource AccentButton}" Height="46" FontSize="15"
-                                        Click="SendBtn_Click"/>
-                                <Button Content="清空发送" Margin="0,6,0,0" Click="ClearSend_Click"/>
-                                <Button Content="发送文件…" Margin="0,6,0,0" Click="SendFile_Click"
-                                        ToolTip="把文件的原始字节发送出去（最大 16 MB，不追加校验和行尾）"/>
-                            </StackPanel>
-                        </Grid>
-                    </Grid>
+                <!-- 发送区：单条 / 多项 -->
+                <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0" Padding="0">
+                    <TabControl x:Name="SendModeTabs" Background="Transparent" BorderThickness="0" Padding="0">
+                        <TabControl.Resources>
+                            <Style TargetType="TabItem" BasedOn="{StaticResource ThemedTabItem}"/>
+                        </TabControl.Resources>
+                        <TabItem Header="单条发送">
+                            <Grid Margin="10,8,10,10">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+                                <DockPanel Margin="0,0,0,4">
+                                    <Button DockPanel.Dock="Right" Content="编辑快捷指令…" Style="{StaticResource SmallButton}"
+                                            VerticalAlignment="Top" Margin="6,0,0,0" Click="EditQuick_Click"/>
+                                    <TextBlock Text="快捷指令" Style="{StaticResource FieldLabel}" VerticalAlignment="Top" Margin="0,4,10,0"/>
+                                    <WrapPanel x:Name="QuickPanel"/>
+                                </DockPanel>
+                                <DockPanel Grid.Row="1" Margin="0,2,0,6">
+                                    <TextBlock Text="发送区" Style="{StaticResource CardTitle}" Margin="0,0,14,0" VerticalAlignment="Center"/>
+                                    <TextBlock Text="历史" Style="{StaticResource FieldLabel}"/>
+                                    <ComboBox x:Name="HistoryCombo" Width="300" Margin="0" SelectionChanged="HistoryCombo_SelectionChanged"
+                                              ToolTip="选择一条历史记录填入发送区">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Display}" MaxWidth="520" TextTrimming="CharacterEllipsis"
+                                                           FontFamily="{StaticResource MonoFont}"/>
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
+                                    <Button Content="清除历史" Style="{StaticResource SmallButton}" Margin="6,0,0,0" Click="ClearHistory_Click"/>
+                                    <TextBlock Text="Ctrl+Enter 发送" Style="{StaticResource MutedText}" HorizontalAlignment="Right"/>
+                                </DockPanel>
+                                <Grid Grid.Row="2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="112"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="SendBox" AcceptsReturn="True" AcceptsTab="False" TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto" FontFamily="{StaticResource MonoFont}" FontSize="13"
+                                             Padding="6,4" VerticalContentAlignment="Top"
+                                             PreviewKeyDown="SendBox_PreviewKeyDown" TextChanged="SendBox_TextChanged"/>
+                                    <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                        <Button x:Name="SendBtn" Content="发送" Style="{StaticResource AccentButton}" Height="46" FontSize="15"
+                                                Click="SendBtn_Click"/>
+                                        <Button Content="清空发送" Margin="0,6,0,0" Click="ClearSend_Click"/>
+                                        <Button Content="发送文件…" Margin="0,6,0,0" Click="SendFile_Click"
+                                                ToolTip="把文件的原始字节发送出去（最大 16 MB，不追加校验和行尾）"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Grid>
+                        </TabItem>
+                        <TabItem Header="多项发送" ToolTip="勾选条目按顺序发送；可循环、暂停、停止">
+                            <Grid Margin="8,6,8,8">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*" MinHeight="80"/>
+                                </Grid.RowDefinitions>
+                                <WrapPanel>
+                                    <Button Content="＋ 添加" Style="{StaticResource PanelButton}" Margin="0,2,4,2" Click="MsAdd_Click"/>
+                                    <Button Content="删除" Style="{StaticResource PanelButton}" Margin="0,2,4,2" Click="MsRemove_Click"/>
+                                    <Button Content="↑" Style="{StaticResource PanelButton}" Margin="0,2,4,2" Click="MsUp_Click"/>
+                                    <Button Content="↓" Style="{StaticResource PanelButton}" Margin="0,2,10,2" Click="MsDown_Click"/>
+                                    <Button Content="全选" Style="{StaticResource PanelButton}" Margin="0,2,4,2" Click="MsSelectAll_Click"/>
+                                    <Button Content="全不选" Style="{StaticResource PanelButton}" Margin="0,2,10,2" Click="MsSelectNone_Click"/>
+                                    <CheckBox x:Name="MsLoopChk" Content="循环发送" VerticalAlignment="Center" Margin="0,2,12,2"
+                                              ToolTip="发完最后一条勾选项后从头再来"/>
+                                    <Button x:Name="MsStartBtn" Content="启动" Style="{StaticResource AccentButton}" Padding="14,2" Margin="0,2,4,2" Click="MsStart_Click"/>
+                                    <Button x:Name="MsPauseBtn" Content="暂停" Style="{StaticResource PanelButton}" Padding="14,2" Margin="0,2,4,2" IsEnabled="False" Click="MsPause_Click"/>
+                                    <Button x:Name="MsStopBtn" Content="停止" Style="{StaticResource DangerButton}" Padding="14,2" Margin="0,2,10,2" IsEnabled="False" Click="MsStop_Click"/>
+                                    <TextBlock x:Name="MsStatusText" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="0,2,0,2"
+                                               Text="勾选要发的条目，启动后按顺序发送；当前条目会高亮。"/>
+                                </WrapPanel>
+                                <DataGrid x:Name="MsGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
+                                          CanUserSortColumns="False" HeadersVisibility="Column" SelectionMode="Single" GridLinesVisibility="Horizontal"
+                                          RowHeaderWidth="0" FontSize="12" Margin="0,4,0,0">
+                                    <DataGrid.RowStyle>
+                                        <Style TargetType="DataGridRow">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+                                                    <Setter Property="Background" Value="#FEF3C7"/>
+                                                    <Setter Property="Foreground" Value="#111827"/>
+                                                    <Setter Property="FontWeight" Value="SemiBold"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </DataGrid.RowStyle>
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="#" Binding="{Binding Index}" IsReadOnly="True" Width="32"/>
+                                        <DataGridCheckBoxColumn Header="发送" Binding="{Binding Enabled, UpdateSourceTrigger=PropertyChanged}" Width="40"/>
+                                        <DataGridTextColumn Header="名称" Binding="{Binding Name, UpdateSourceTrigger=LostFocus}" Width="90"/>
+                                        <DataGridTextColumn Header="内容" Binding="{Binding Content, UpdateSourceTrigger=LostFocus}" Width="*"/>
+                                        <DataGridCheckBoxColumn Header="HEX" Binding="{Binding Hex, UpdateSourceTrigger=PropertyChanged}" Width="40"/>
+                                        <DataGridComboBoxColumn Header="校验" SelectedItemBinding="{Binding Checksum, UpdateSourceTrigger=PropertyChanged}"
+                                                                ItemsSource="{x:Static local:TestUiOptions.ChecksumNames}" Width="105"/>
+                                        <DataGridTextColumn Header="延时ms" Binding="{Binding DelayMs, UpdateSourceTrigger=LostFocus}" Width="64"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </Grid>
+                        </TabItem>
+                    </TabControl>
                 </Border>
             </Grid>
         </Grid>

@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.IO.Ports;
 using System.Text.Json.Serialization;
@@ -150,6 +151,10 @@ public sealed class AppSettings
     public int TestLoops { get; set; } = 1;
     public GatewaySettings Gateway { get; set; } = new();
 
+    // v1.6：多项发送
+    public List<SerialTool.Features.MultiSendItem> MultiSendItems { get; set; } = new();
+    public bool MultiSendLoop { get; set; }
+
     /// <summary>
     /// 迁移 / 规范化会话列表：v1.4 及以前没有 Sessions，把原来的单会话迁移为“会话 1”（第 1 个标签页）。
     /// 返回 true 表示做了迁移。
@@ -272,8 +277,15 @@ public sealed class SessionSettings
     public string ScriptText { get; set; } = "";
     public string DslScriptText { get; set; } = "";
     public string LuaScriptText { get; set; } = "";
+    public List<SerialTool.Features.MultiSendItem> MultiSendItems { get; set; } = new();
+    public bool MultiSendLoop { get; set; }
 
-    public SessionSettings Clone() => (SessionSettings)MemberwiseClone();
+    public SessionSettings Clone()
+    {
+        var c = (SessionSettings)MemberwiseClone();
+        c.MultiSendItems = MultiSendItems?.Select(x => x.Clone()).ToList() ?? new List<SerialTool.Features.MultiSendItem>();
+        return c;
+    }
 
     public void Normalize()
     {
@@ -291,6 +303,9 @@ public sealed class SessionSettings
         ScriptText ??= "";
         DslScriptText ??= "";
         LuaScriptText ??= "";
+        MultiSendItems ??= new List<SerialTool.Features.MultiSendItem>();
+        MultiSendItems.RemoveAll(x => x == null);
+        foreach (var it in MultiSendItems) it.Normalize();
         if (BaudRate <= 0) BaudRate = 115200;
         if (DataBits < 5 || DataBits > 8) DataBits = 8;
         if (TimerIntervalMs < 10) TimerIntervalMs = 1000;
@@ -331,6 +346,8 @@ public sealed class SessionSettings
         SendText = s.SendText ?? "",
         ScriptLanguage = s.ScriptLanguage ?? "DSL",
         ScriptText = s.ScriptText ?? "",
+        MultiSendItems = s.MultiSendItems?.Select(x => x.Clone()).ToList() ?? new List<SerialTool.Features.MultiSendItem>(),
+        MultiSendLoop = s.MultiSendLoop,
     };
 }
 

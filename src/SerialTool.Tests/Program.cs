@@ -855,10 +855,11 @@ finally
     CheckTrue("HTML report has rows colored + rate", html.Contains("<html") && html.Contains("class=\"pass\"") && html.Contains("class=\"fail\"") && html.Contains("75.0%") && html.Contains("单元测试"));
     CheckTrue("HTML encodes content", !html.Contains("<b>+VER") && TestSuite.Sample().Steps.Count >= 4);
 
-    // 失败即中止
-    var stopSuite = new TestSuite { Steps = { new TestStep { Send = "AT+SILENT\\r\\n", ExpectValue = "OK", TimeoutMs = 100, ContinueOnFail = false }, new TestStep { Send = "AT\\r\\n", ExpectValue = "OK" } } };
-    var rep2 = new TestRunner(dev).Run(stopSuite, 3, CancellationToken.None);
-    CheckTrue("continue-on-fail=false aborts run", rep2.Aborted && rep2.Results.Count == 1);
+    // 失败即中止（独立通道，避免上一步异步应答迟到干扰）
+    var stopDev = new FakeChannel("中止测试") { DelayMs = 0, Responder = _ => null };
+    var stopSuite = new TestSuite { Steps = { new TestStep { Send = "AT+SILENT\r\n", ExpectValue = "OK", TimeoutMs = 80, ContinueOnFail = false }, new TestStep { Send = "AT\r\n", ExpectValue = "OK" } } };
+    var rep2 = new TestRunner(stopDev).Run(stopSuite, 3, CancellationToken.None);
+    CheckTrue("continue-on-fail=false aborts run", rep2.Aborted && rep2.Results.Count == 1 && rep2.Results[0].Verdict == TestVerdict.Fail);
     // 取消
     var cts15 = new CancellationTokenSource(150);
     var rep3 = new TestRunner(dev).Run(new TestSuite { Steps = { new TestStep { Send = "AT+SILENT\\r\\n", ExpectValue = "OK", TimeoutMs = 5000 } } }, 1, cts15.Token);
@@ -1060,6 +1061,100 @@ log(waitfor('NOPE', 50) == nil) log(session.name, session.isopen())", Cancellati
     CheckTrue("lua stop background", bgr.Status == LuaRunStatus.Cancelled && !bg.IsRunning);
     CheckTrue("lua byte string round trip", LuaScriptHost.ToByteString(new byte[] { 0, 0x80, 0xFF }) == "\u0000\u0080\u00FF" && Hx(new LuaScriptHost(lch).FromLuaString("\u0001\u00FF")) == "01 FF");
     CheckTrue("lua samples compile", LuaSamples.All.All(sm => { try { new MoonSharp.Interpreter.Script().LoadString(sm.Code); return true; } catch { return false; } }));
+}
+
+
+// =====================================================================
+// v1.6：多项发送
+// =====================================================================
+{
+    Console.WriteLine("\n== v1.6 多项发送 ==");
+    var sent = new System.Collections.Concurrent.ConcurrentQueue<string>();
+    var eng = new MultiSendEngine { DelayFn = (ms, ct) => { if (ct.IsCancellationRequested) return false; if (ms > 0) ct.WaitHandle.WaitOne(Math.Min(ms, 5)); return !ct.IsCancellationRequested; } };
+    var items = new List<MultiSendItem>
+    {
+        new() { Enabled = true, Name = "A", Content = "A", DelayMs = 10 },
+        new() { Enabled = false, Name = "skip", Content = "X", DelayMs = 10 },
+        new() { Enabled = true, Name = "B", Content = "B", DelayMs = 10 },
+        new() { Enabled = true, Name = "C", Content = "C", DelayMs = 10 },
+        new() { Enabled = true, Name = "empty", Content = "", DelayMs = 10 },
+    };
+    var order = new List<string>();
+    eng.ItemSent += (_, it) => order.Add(it.Content);
+    await eng.StartAsync(items, false, it => { sent.Enqueue(it.Content); return null; });
+    await eng.WaitAsync();
+    Check("sequence skips unselected/empty", "A,B,C", string.Join(",", order));
+    CheckTrue("one pass loops=1", eng.LoopsCompleted == 1 && eng.SendsCompleted == 3 && eng.State == MultiSendState.Idle);
+
+    // 循环两轮后停止
+    order.Clear();
+    var eng2 = new MultiSendEngine { DelayFn = (ms, ct) => !ct.IsCancellationRequested };
+    eng2.ItemSent += (_, it) =>
+    {
+        order.Add(it.Content);
+        if (order.Count >= 5) eng2.Stop(); // A B C A B → stop
+    };
+    await eng2.StartAsync(items, true, it => null);
+    await eng2.WaitAsync();
+    CheckTrue("loop continues then stop", string.Join(",", order).StartsWith("A,B,C,A,B") && eng2.State == MultiSendState.Idle);
+
+    // 暂停 / 继续
+    order.Clear();
+    var eng3 = new MultiSendEngine();
+    eng3.DelayFn = (ms, ct) =>
+    {
+        // 让暂停有机会卡住
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < Math.Max(ms, 80))
+        {
+            if (ct.IsCancellationRequested) return false;
+            if (ct.WaitHandle.WaitOne(10)) return false;
+        }
+        return true;
+    };
+    var started = new ManualResetEventSlim(false);
+    eng3.ItemSent += (_, it) =>
+    {
+        order.Add(it.Content);
+        if (order.Count == 1) started.Set();
+    };
+    var t = eng3.StartAsync(new List<MultiSendItem>
+    {
+        new() { Content = "1", DelayMs = 200 },
+        new() { Content = "2", DelayMs = 200 },
+        new() { Content = "3", DelayMs = 10 },
+    }, false, it => null);
+    CheckTrue("pause: first item sent", started.Wait(3000));
+    eng3.Pause();
+    CheckTrue("state paused", await WaitFor(() => eng3.State == MultiSendState.Paused, 2000));
+    int atPause = order.Count;
+    await Task.Delay(300);
+    CheckTrue("paused freezes sequence", order.Count == atPause);
+    eng3.Resume();
+    await eng3.WaitAsync();
+    Check("resume continues", "1,2,3", string.Join(",", order));
+    CheckTrue("resume ends idle", eng3.State == MultiSendState.Idle && eng3.CurrentIndex < 0);
+
+    // 发送失败中止
+    var eng4 = new MultiSendEngine { DelayFn = (ms, ct) => true };
+    string? finErr = "not-set";
+    eng4.Finished += e => finErr = e;
+    await eng4.StartAsync(new List<MultiSendItem> { new() { Content = "ok" }, new() { Content = "bad" }, new() { Content = "later" } }, false,
+        it => it.Content == "bad" ? "模拟失败" : null);
+    await eng4.WaitAsync();
+    Check("fail stops with error", "模拟失败", finErr);
+    CheckTrue("fail did not send later", eng4.SendsCompleted == 1);
+
+    // Clone / normalize / settings round trip
+    var msItem = new MultiSendItem { Name = "n", Content = "01 02", Hex = true, Checksum = "ModbusCrc16", DelayMs = -5, Enabled = true };
+    msItem.Normalize();
+    CheckTrue("normalize delay", msItem.DelayMs == 0);
+    var app = new AppSettings { MultiSendLoop = true, MultiSendItems = { msItem.Clone() } };
+    var json = System.Text.Json.JsonSerializer.Serialize(app);
+    var back = System.Text.Json.JsonSerializer.Deserialize<AppSettings>(json)!;
+    CheckTrue("settings persist multi-send", back.MultiSendLoop && back.MultiSendItems.Count == 1 && back.MultiSendItems[0].Hex && back.MultiSendItems[0].Checksum == "ModbusCrc16");
+    var sess = SessionSettings.FromLegacy(back, "会话 1");
+    CheckTrue("fromlegacy copies multi-send", sess.MultiSendLoop && sess.MultiSendItems.Count == 1 && sess.Clone().MultiSendItems[0].Content == "01 02");
 }
 
 Console.WriteLine($"\n结果：{pass} 通过，{fail} 失败");

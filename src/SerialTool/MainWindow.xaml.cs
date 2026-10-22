@@ -225,6 +225,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         ApplyProtocolModeUi();
         UpdateChecksumPreview();
         InitControlsV15();
+        InitControlsV16();
     }
 
     private void CollectSettings()
@@ -262,6 +263,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         s.AutoReplyEnabled = AutoReplyChk.IsChecked == true;
         CollectSettingsV13();
         CollectSettingsV14();
+        CollectSettingsV16();
         CollectSettingsV15();
 
         var bounds = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
@@ -326,6 +328,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
             App.LogCrash(ex);
         }
         try { ShutdownV15(); } catch (Exception ex) { App.LogCrash(ex); }
+        try { ShutdownV16(); } catch (Exception ex) { App.LogCrash(ex); }
 
         var s = _conn;
         _conn = null;
@@ -609,6 +612,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         OnMainConnectionClosingV14();
         _busy = true;
         StopTimedSend(null);
+        try { _msEngine.Stop(); } catch { /* ignore */ }
         UpdateOpenState();
         SetStatus("正在关闭串口…");
 
