@@ -11,7 +11,7 @@
     <AssemblyName>SerialTool</AssemblyName>
     <RootNamespace>SerialTool</RootNamespace>
     <ApplicationIcon>app.ico</ApplicationIcon>
-    <Version>1.6.0</Version>
+    <Version>1.7.0</Version>
     <Product>SerialTool 串口调试助手</Product>
     <Description>SerialTool 串口调试助手</Description>
     <Copyright>MIT</Copyright>

@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Collections.Generic;
 using System.Text;
 using System.Linq;
@@ -1155,6 +1156,110 @@ log(waitfor('NOPE', 50) == nil) log(session.name, session.isopen())", Cancellati
     CheckTrue("settings persist multi-send", back.MultiSendLoop && back.MultiSendItems.Count == 1 && back.MultiSendItems[0].Hex && back.MultiSendItems[0].Checksum == "ModbusCrc16");
     var sess = SessionSettings.FromLegacy(back, "会话 1");
     CheckTrue("fromlegacy copies multi-send", sess.MultiSendLoop && sess.MultiSendItems.Count == 1 && sess.Clone().MultiSendItems[0].Content == "01 02");
+}
+
+
+// =====================================================================
+// v1.7：ASCII 行解析
+// =====================================================================
+{
+    Console.WriteLine("\n== v1.7 ASCII 行解析 ==");
+    var aT0 = new DateTime(2026, 1, 1, 12, 0, 0);
+    var aEnc = Encoding.UTF8;
+    var aKv = AsciiLineTemplate.SampleKeyValue();
+    CheckTrue("ascii kv template valid", aKv.Validate() == null);
+    var aPk = new AsciiLineParser(aKv);
+    var aR1 = aPk.Push(aEnc.GetBytes("temp=23.5,hum=40\r\n"), aT0, false, aEnc);
+    CheckTrue("ascii kv one line", aR1.Count == 1 && aR1[0].Ok);
+    Check("ascii kv temp", "23.5 ℃", aR1[0].Fields.First(f => f.Name == "温度").Value);
+    Check("ascii kv hum", "40 %", aR1[0].Fields.First(f => f.Name == "湿度").Value);
+
+    var aPk2 = new AsciiLineParser(aKv);
+    CheckTrue("ascii split mid-line pending", aPk2.Push(aEnc.GetBytes("temp=1"), aT0, false, aEnc).Count == 0 && aPk2.PendingBytes > 0);
+    CheckTrue("ascii split after CR still pending", aPk2.Push(aEnc.GetBytes(".5,hum=2\r"), aT0.AddMilliseconds(10), false, aEnc).Count == 0);
+    var aR2 = aPk2.Push(aEnc.GetBytes("\nmore=x\n"), aT0.AddMilliseconds(20), false, aEnc);
+    CheckTrue("ascii CRLF across chunks", aR2.Count >= 1 && aR2[0].Ok && aR2[0].Fields.First(f => f.Name == "温度").Value.StartsWith("1.5"));
+
+    var aCsv = AsciiLineTemplate.SampleCsv();
+    var aPc = new AsciiLineParser(aCsv);
+    var aLf = aPc.Push(aEnc.GetBytes("1,2.5,ok\n2,3,bad\r3,4,x\r\n"), aT0, false, aEnc);
+    CheckTrue("ascii LF/CR/CRLF all work", aLf.Count == 3 && aLf.All(x => x.Ok));
+    Check("ascii csv col0", "1", aLf[0].Fields[0].Value);
+    Check("ascii csv float", "2.5", aLf[0].Fields[1].Value);
+
+    var aPlain = new AsciiLineTemplate
+    {
+        Name = "plain", Mode = AsciiSplitMode.Delimiter, Delimiter = ",", Prefix = "", Suffix = "",
+        Fields = { new AsciiField { Name = "a", Index = 0 }, new AsciiField { Name = "b", Index = 1 } },
+    };
+    CheckTrue("ascii empty prefix/suffix ok", aPlain.Validate() == null);
+    CheckTrue("ascii no header required", new AsciiLineParser(aPlain).Push(aEnc.GetBytes("hello,world\n"), aT0, false, aEnc)[0].Ok);
+
+    var aWithP = aPlain.Clone();
+    aWithP.Prefix = "DATA:";
+    var aPf = new AsciiLineParser(aWithP);
+    var aRf = aPf.Push(aEnc.GetBytes("skip,me\nDATA:1,2\n"), aT0, false, aEnc);
+    CheckTrue("ascii prefix filter", aRf.Count == 1 && aRf[0].Ok && aRf[0].Fields[0].Value == "1" && aPf.SkippedLines == 1);
+
+    var aWithS = aPlain.Clone();
+    aWithS.Suffix = ";";
+    var aPs = new AsciiLineParser(aWithS);
+    var aRs = aPs.Push(aEnc.GetBytes("a,b;\nx,y\n"), aT0, false, aEnc);
+    CheckTrue("ascii suffix filter", aRs.Count == 1 && aRs[0].Ok && aPs.SkippedLines == 1);
+
+    var aRxTpl = new AsciiLineTemplate
+    {
+        Name = "re", Mode = AsciiSplitMode.Regex, Delimiter = @"ID=(\d+)\s+VAL=([-+.\d]+)",
+        Fields = { new AsciiField { Name = "id", Index = 0, Type = AsciiFieldType.Int }, new AsciiField { Name = "val", Index = 1, Type = AsciiFieldType.Float } },
+    };
+    CheckTrue("ascii regex valid", aRxTpl.Validate() == null);
+    var aRr = new AsciiLineParser(aRxTpl).Push(aEnc.GetBytes("ID=12 VAL=-3.5\n"), aT0, false, aEnc);
+    CheckTrue("ascii regex extract", aRr.Count == 1 && aRr[0].Ok && aRr[0].Fields[0].Value == "12" && aRr[0].Fields[1].Value == "-3.5");
+
+    var aFw = new AsciiLineTemplate
+    {
+        Name = "fw", Mode = AsciiSplitMode.FixedWidth,
+        Fields =
+        {
+            new AsciiField { Name = "code", Start = 0, Length = 3, Type = AsciiFieldType.Text },
+            new AsciiField { Name = "num", Start = 3, Length = 4, Type = AsciiFieldType.Int, Scale = 0.1, Unit = "V" },
+        },
+    };
+    var aRw = new AsciiLineParser(aFw).Push(aEnc.GetBytes("ABC0125\n"), aT0, false, aEnc);
+    CheckTrue("ascii fixed width", aRw.Count == 1 && aRw[0].Ok && aRw[0].Fields[0].Value == "ABC" && aRw[0].Fields[1].Value == "12.5 V");
+
+    var aHx = new AsciiLineTemplate
+    {
+        Name = "hx", Mode = AsciiSplitMode.Delimiter, Delimiter = ",",
+        Fields = { new AsciiField { Name = "bin", Index = 0, Type = AsciiFieldType.Hex } },
+    };
+    Check("ascii hex field", "0A FF", new AsciiLineParser(aHx).Push(aEnc.GetBytes("0aff\n"), aT0, false, aEnc)[0].Fields[0].Value);
+
+    Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+    var aGbk = Encoding.GetEncoding("GBK");
+    var aTg = aPlain.Clone();
+    aTg.Encoding = "GBK";
+    var aChinese = aGbk.GetBytes("你好,世界\n");
+    var aRg = new AsciiLineParser(aTg).Push(aChinese, aT0, false, Encoding.UTF8);
+    CheckTrue("ascii GBK encoding", aRg.Count == 1 && aRg[0].Ok && aRg[0].Fields[0].Value == "你好" && aRg[0].Fields[1].Value == "世界");
+
+    var aPt = new AsciiLineParser(new AsciiLineTemplate { Name = "t", PartialTimeoutMs = 50, Fields = { new AsciiField { Name = "a", Index = 0 } }, Mode = AsciiSplitMode.Delimiter, Delimiter = "," });
+    aPt.Push(aEnc.GetBytes("incomp"), aT0, false, aEnc);
+    var aLate = aPt.Push(aEnc.GetBytes("lete,1\n"), aT0.AddMilliseconds(200), false, aEnc);
+    CheckTrue("ascii partial timeout drops stale", aLate.Count == 1 && aLate[0].Ok && aLate[0].Fields[0].Value == "lete");
+
+    var aBadP = new AsciiLineParser(aCsv);
+    var aRb = aBadP.Push(aEnc.GetBytes("only-one\n"), aT0, false, aEnc);
+    CheckTrue("ascii missing column -> error", aRb.Count == 1 && !aRb[0].Ok && aBadP.BadCount == 1);
+
+    var aPath = Path.Combine(Path.GetTempPath(), "ascii_tpl_" + Guid.NewGuid().ToString("N") + ".json");
+    AsciiLineTemplateStore.Save(aPath, new List<AsciiLineTemplate> { aKv, aCsv });
+    var aLoaded = AsciiLineTemplateStore.Load(aPath);
+    CheckTrue("ascii store round trip", aLoaded.Count == 2 && aLoaded[0].Name == aKv.Name && aLoaded[1].Fields.Count == 3);
+    try { File.Delete(aPath); } catch { }
+
+    var aBin = FrameTemplate.Sample();
+    CheckTrue("binary frame still valid", aBin.Validate() == null && new FrameParser(aBin).Push(H("AA 55 05 01 00 FA 01 C2 C3"), aT0).Count == 1);
 }
 
 Console.WriteLine($"\n结果：{pass} 通过，{fail} 失败");

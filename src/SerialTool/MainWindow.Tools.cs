@@ -202,12 +202,14 @@ public partial class MainWindow
         }
         if (_transferActive && !c.Replayed) return false;
         FeedFrameParsers(c);
+        FeedAsciiParsers(c);
         return true;
     }
 
     private void FlushV14()
     {
         FlushFrameRows();
+        FlushAsciiRows();
         FlushSlaveLog();
         UpdateReplayUi();
     }

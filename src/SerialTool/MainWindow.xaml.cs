@@ -222,6 +222,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         RebuildRules();
         InitControlsV13();
         InitControlsV14();
+        InitControlsV17();
         ApplyProtocolModeUi();
         UpdateChecksumPreview();
         InitControlsV15();
@@ -263,6 +264,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         s.AutoReplyEnabled = AutoReplyChk.IsChecked == true;
         CollectSettingsV13();
         CollectSettingsV14();
+        CollectSettingsV17();
         CollectSettingsV16();
         CollectSettingsV15();
 

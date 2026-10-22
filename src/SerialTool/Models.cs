@@ -131,6 +131,10 @@ public sealed class AppSettings
     public string FrameTemplateName { get; set; } = "";
     public bool FrameParseEnabled { get; set; }
     public bool FrameParseTx { get; set; }
+    // v1.7：ASCII 行解析
+    public string AsciiLineTemplateName { get; set; } = "";
+    public bool AsciiLineParseEnabled { get; set; }
+    public bool AsciiLineParseTx { get; set; }
     public ModbusSlaveSettings Slave { get; set; } = new();
     public string TransferProtocol { get; set; } = "YModem";
     public string TransferDir { get; set; } = "";

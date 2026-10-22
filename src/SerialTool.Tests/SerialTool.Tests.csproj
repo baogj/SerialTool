@@ -28,10 +28,12 @@
     <Compile Include="../SerialTool/Features/ModbusGateway.cs" Link="Linked/ModbusGateway.cs" />
     <Compile Include="../SerialTool/Features/LuaScriptHost.cs" Link="Linked/LuaScriptHost.cs" />
     <Compile Include="../SerialTool/Features/MultiSend.cs" Link="Linked/MultiSend.cs" />
+    <Compile Include="../SerialTool/Features/AsciiLineTemplate.cs" Link="Linked/AsciiLineTemplate.cs" />
     <Compile Include="../SerialTool/SerialSession.cs" Link="Linked/SerialSession.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="MoonSharp" Version="2.0.0" />
     <PackageReference Include="System.IO.Ports" Version="8.0.0" />
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
   </ItemGroup>
 </Project>

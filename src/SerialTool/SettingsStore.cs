@@ -96,6 +96,7 @@ public static class SettingsStore
         s.BridgeHost ??= "127.0.0.1";
         if (s.CurveWindow < 50) s.CurveWindow = 500;
         s.FrameTemplateName ??= "";
+        s.AsciiLineTemplateName ??= "";
         s.Slave ??= new ModbusSlaveSettings();
         s.Slave.Framing ??= "Rtu";
         if (s.Slave.SlaveId < 1 || s.Slave.SlaveId > 247) s.Slave.SlaveId = 1;

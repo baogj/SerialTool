@@ -761,6 +761,56 @@
                                 </TabItem>
 
                                 <!-- Modbus 从站 -->
+                                <!-- v1.7：ASCII 行解析 -->
+                                <TabItem Header="ASCII 行解析" ToolTip="按行切分文本协议：前缀/后缀可选，无需帧长度">
+                                    <Grid Background="{DynamicResource RxBgBrush}">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*"/>
+                                        </Grid.RowDefinitions>
+                                        <Border Background="{DynamicResource RxHeaderBgBrush}" Padding="10,5">
+                                            <DockPanel>
+                                                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                                                    <TextBlock x:Name="AsciiStatsText" Text="正确 0  错误 0  跳过 0 行" Foreground="{DynamicResource RxHeaderFgBrush}"
+                                                               FontFamily="{StaticResource MonoFont}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                                    <Button Content="导出 CSV…" Style="{StaticResource PanelButton}" Margin="0,0,6,0" Click="AsciiExport_Click"/>
+                                                    <Button Content="清空" Style="{StaticResource PanelButton}" Click="AsciiClear_Click"/>
+                                                </StackPanel>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <CheckBox x:Name="AsciiEnableChk" Content="启用解析" Foreground="{DynamicResource RxHeaderFgBrush}"
+                                                              VerticalAlignment="Center" Margin="0,0,12,0" Click="AsciiOption_Click"/>
+                                                    <TextBlock Text="模板" Foreground="{DynamicResource RxHeaderFgBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                    <ComboBox x:Name="AsciiTplCombo" Width="210" Height="24" Margin="0" SelectionChanged="AsciiTpl_Changed"
+                                                              DisplayMemberPath="Name"/>
+                                                    <Button Content="编辑模板…" Style="{StaticResource PanelButton}" Margin="6,0,12,0" Click="AsciiEdit_Click"/>
+                                                    <CheckBox x:Name="AsciiTxChk" Content="含发送" Foreground="{DynamicResource RxHeaderFgBrush}"
+                                                              VerticalAlignment="Center" Margin="0,0,10,0" Click="AsciiOption_Click"/>
+                                                    <CheckBox x:Name="AsciiBadOnlyChk" Content="只看错误行" Foreground="{DynamicResource RxHeaderFgBrush}"
+                                                              VerticalAlignment="Center" Click="AsciiBadOnly_Click"/>
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+                                        <TextBlock x:Name="AsciiInfoText" Grid.Row="1" Style="{StaticResource MutedText}" Margin="10,4" TextWrapping="Wrap"
+                                                   FontFamily="{StaticResource MonoFont}"/>
+                                        <DataGrid x:Name="AsciiGrid" Grid.Row="2" Margin="10,0,10,8" AutoGenerateColumns="False" IsReadOnly="True"
+                                                  CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column"
+                                                  EnableRowVirtualization="True" EnableColumnVirtualization="True" FontFamily="{StaticResource MonoFont}">
+                                            <DataGrid.RowStyle>
+                                                <Style TargetType="DataGridRow">
+                                                    <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Ok}" Value="False">
+                                                            <Setter Property="Foreground" Value="{DynamicResource DangerBrush}"/>
+                                                            <Setter Property="FontWeight" Value="SemiBold"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </DataGrid.RowStyle>
+                                        </DataGrid>
+                                    </Grid>
+                                </TabItem>
+
                                 <TabItem Header="Modbus 从站">
                                     <Grid Background="{DynamicResource RxBgBrush}">
                                         <Grid.RowDefinitions>
