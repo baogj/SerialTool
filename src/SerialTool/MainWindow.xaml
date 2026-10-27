@@ -20,6 +20,38 @@
                 Padding="14,5">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <!-- v1.8：工具菜单 / 置顶 / 迷你模式 -->
+                    <Grid Margin="0,0,8,0">
+                        <Button x:Name="ToolsBtn" Content="工具 ▾" Style="{StaticResource SmallButton}" Click="ToolsBtn_Click"
+                                ToolTip="数据转换、加密/编码计算、数据对比、接收触发规则、透明度、检查更新">
+                            <Button.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="数据转换…（HEX / 文本 / 数值 / 字节序）" Click="ToolConvert_Click"/>
+                                    <MenuItem Header="加密 / 编码计算…（CRC / Hash / AES / Base64）" Click="ToolCrypto_Click"/>
+                                    <MenuItem Header="数据对比…" Click="ToolDiff_Click"/>
+                                    <Separator/>
+                                    <MenuItem x:Name="TriggerMenuItem" Header="接收触发规则…" Click="ToolTriggers_Click"/>
+                                    <MenuItem x:Name="TriggerMenuEnabled" Header="启用接收触发" IsCheckable="True" Click="TriggerEnabled_Click"/>
+                                    <Separator/>
+                                    <MenuItem x:Name="OpacityMenu" Header="窗口不透明度">
+                                        <MenuItem Header="100%" Tag="1.0" IsCheckable="True" Click="Opacity_Click"/>
+                                        <MenuItem Header="90%" Tag="0.9" IsCheckable="True" Click="Opacity_Click"/>
+                                        <MenuItem Header="80%" Tag="0.8" IsCheckable="True" Click="Opacity_Click"/>
+                                        <MenuItem Header="70%" Tag="0.7" IsCheckable="True" Click="Opacity_Click"/>
+                                        <MenuItem Header="60%" Tag="0.6" IsCheckable="True" Click="Opacity_Click"/>
+                                        <MenuItem Header="50%" Tag="0.5" IsCheckable="True" Click="Opacity_Click"/>
+                                    </MenuItem>
+                                    <Separator/>
+                                    <MenuItem Header="检查更新…" Click="ToolUpdate_Click"/>
+                                </ContextMenu>
+                            </Button.ContextMenu>
+                        </Button>
+                        <Ellipse x:Name="UpdateBadge" Width="8" Height="8" Fill="#EF4444" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                 Margin="0,-2,-2,0" Visibility="Collapsed" IsHitTestVisible="False"/>
+                    </Grid>
+                    <CheckBox x:Name="TopMostChk" Content="置顶" VerticalAlignment="Center" Margin="0,0,8,0" Click="TopMostChk_Click" ToolTip="窗口总在最前"/>
+                    <Button x:Name="MiniBtn" Content="迷你模式" Style="{StaticResource SmallButton}" Margin="0,0,14,0" Click="MiniBtn_Click"
+                            ToolTip="切换到小窗口：最近接收、发送框、打开/关闭"/>
                     <TextBlock Text="主题" Style="{StaticResource FieldLabel}"/>
                     <ComboBox x:Name="ThemeCombo" Width="104" Margin="0" SelectionChanged="ThemeCombo_SelectionChanged"
                               ToolTip="浅色 / 深色 / 跟随 Windows 系统设置"/>

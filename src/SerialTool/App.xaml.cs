@@ -9,6 +9,19 @@ namespace SerialTool;
 
 public partial class App : Application
 {
+    /// <summary>v1.8：自动更新完成后，退出时启动的新 exe。</summary>
+    internal static string? RestartExe;
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        base.OnExit(e);
+        if (RestartExe != null)
+        {
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(RestartExe) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(RestartExe) ?? "" }); }
+            catch (Exception ex) { LogCrash(ex); }
+        }
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
         // GBK / GB2312 等代码页编码在 .NET Core 下需要显式注册

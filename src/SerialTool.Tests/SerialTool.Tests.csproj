@@ -29,6 +29,11 @@
     <Compile Include="../SerialTool/Features/LuaScriptHost.cs" Link="Linked/LuaScriptHost.cs" />
     <Compile Include="../SerialTool/Features/MultiSend.cs" Link="Linked/MultiSend.cs" />
     <Compile Include="../SerialTool/Features/AsciiLineTemplate.cs" Link="Linked/AsciiLineTemplate.cs" />
+    <Compile Include="../SerialTool/Features/DataConvert.cs" Link="Linked/DataConvert.cs" />
+    <Compile Include="../SerialTool/Features/CryptoCalc.cs" Link="Linked/CryptoCalc.cs" />
+    <Compile Include="../SerialTool/Features/RxTriggers.cs" Link="Linked/RxTriggers.cs" />
+    <Compile Include="../SerialTool/Features/UpdateChecker.cs" Link="Linked/UpdateChecker.cs" />
+    <Compile Include="../SerialTool/Features/DataDiff.cs" Link="Linked/DataDiff.cs" />
     <Compile Include="../SerialTool/SerialSession.cs" Link="Linked/SerialSession.cs" />
   </ItemGroup>
   <ItemGroup>

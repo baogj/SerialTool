@@ -135,6 +135,21 @@ public sealed class AppSettings
     public string AsciiLineTemplateName { get; set; } = "";
     public bool AsciiLineParseEnabled { get; set; }
     public bool AsciiLineParseTx { get; set; }
+    // v1.8：窗口控制 / 接收触发 / 检查更新
+    public bool AlwaysOnTop { get; set; }
+    /// <summary>窗口不透明度 0.3~1.0。</summary>
+    public double WindowOpacity { get; set; } = 1.0;
+    public double? MiniLeft { get; set; }
+    public double? MiniTop { get; set; }
+    public double MiniWidth { get; set; } = 420;
+    public double MiniHeight { get; set; } = 300;
+    public int MiniLines { get; set; } = 30;
+    public bool MiniHex { get; set; }
+    public bool MiniTopmost { get; set; } = true;
+    public bool TriggersEnabled { get; set; } = true;
+    public bool CheckUpdateOnStartup { get; set; }
+    public DateTime? LastUpdateCheck { get; set; }
+    public string SkippedUpdateVersion { get; set; } = "";
     public ModbusSlaveSettings Slave { get; set; } = new();
     public string TransferProtocol { get; set; } = "YModem";
     public string TransferDir { get; set; } = "";

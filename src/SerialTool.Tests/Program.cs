@@ -1262,6 +1262,346 @@ log(waitfor('NOPE', 50) == nil) log(session.name, session.isopen())", Cancellati
     CheckTrue("binary frame still valid", aBin.Validate() == null && new FrameParser(aBin).Push(H("AA 55 05 01 00 FA 01 C2 C3"), aT0).Count == 1);
 }
 
+// ====================== v1.8：数据转换 ======================
+{
+    Check("dc float 1.0 ABCD", "3F 80 00 00", Hx(DataConvert.TryEncode(NumType.Float, "1.0", ByteOrder.ABCD, out var dcB1, out _) ? dcB1 : Array.Empty<byte>()));
+    DataConvert.TryEncode(NumType.Float, "1", ByteOrder.DCBA, out var dcB2, out _);
+    Check("dc float 1.0 DCBA", "00 00 80 3F", Hx(dcB2));
+    DataConvert.TryEncode(NumType.Float, "1", ByteOrder.BADC, out var dcB3, out _);
+    Check("dc float 1.0 BADC", "80 3F 00 00", Hx(dcB3));
+    DataConvert.TryEncode(NumType.Float, "1", ByteOrder.CDAB, out var dcB4, out _);
+    Check("dc float 1.0 CDAB", "00 00 3F 80", Hx(dcB4));
+    foreach (var (o, exp) in new[] { (ByteOrder.ABCD, "12 34 56 78"), (ByteOrder.DCBA, "78 56 34 12"), (ByteOrder.BADC, "34 12 78 56"), (ByteOrder.CDAB, "56 78 12 34") })
+    {
+        DataConvert.TryEncode(NumType.Int32, "305419896", o, out var dcI, out _);
+        Check($"dc int32 0x12345678 {o}", exp, Hx(dcI));
+        DataConvert.TryDecode(NumType.UInt32, H(exp), o, out var dcBack);
+        Check($"dc uint32 decode {o}", "305419896", dcBack);
+    }
+    DataConvert.TryEncode(NumType.Int16, "-2", ByteOrder.ABCD, out var dcS1, out _);
+    Check("dc int16 -2", "FF FE", Hx(dcS1));
+    DataConvert.TryEncode(NumType.Int16, "-2", ByteOrder.DCBA, out var dcS2, out _);
+    Check("dc int16 -2 little", "FE FF", Hx(dcS2));
+    DataConvert.TryEncode(NumType.Int16, "0xFFFF", ByteOrder.ABCD, out var dcS3, out _);
+    DataConvert.TryDecode(NumType.Int16, dcS3, ByteOrder.ABCD, out var dcS3v);
+    Check("dc int16 0xFFFF = -1", "-1", dcS3v);
+    CheckTrue("dc uint16 65536 out of range", !DataConvert.TryEncode(NumType.UInt16, "65536", ByteOrder.ABCD, out _, out var dcErr1) && dcErr1.Contains("范围"));
+    CheckTrue("dc int8 -129 out of range", !DataConvert.TryEncode(NumType.Int8, "-129", ByteOrder.ABCD, out _, out _));
+    CheckTrue("dc uint32 negative rejected", !DataConvert.TryEncode(NumType.UInt32, "-1", ByteOrder.ABCD, out _, out _));
+    CheckTrue("dc bad text rejected", !DataConvert.TryEncode(NumType.Int32, "12a", ByteOrder.ABCD, out _, out _));
+    DataConvert.TryEncode(NumType.UInt64, "18446744073709551615", ByteOrder.ABCD, out var dcU64, out _);
+    Check("dc uint64 max", "FF FF FF FF FF FF FF FF", Hx(dcU64));
+    DataConvert.TryEncode(NumType.Int64, "-9223372036854775808", ByteOrder.ABCD, out var dcI64, out _);
+    Check("dc int64 min", "80 00 00 00 00 00 00 00", Hx(dcI64));
+    DataConvert.TryEncode(NumType.Double, "1", ByteOrder.ABCD, out var dcD1, out _);
+    Check("dc double 1.0", "3F F0 00 00 00 00 00 00", Hx(dcD1));
+    DataConvert.TryDecode(NumType.Double, H("00 00 00 00 00 00 F0 3F"), ByteOrder.DCBA, out var dcD2);
+    Check("dc double decode little", "1", dcD2);
+    DataConvert.TryDecode(NumType.Float, H("40 48 F5 C3"), ByteOrder.ABCD, out var dcF3);
+    Check("dc float 3.14", "3.14", dcF3);
+    DataConvert.TryDecode(NumType.Float, H("F5 C3 40 48"), ByteOrder.CDAB, out var dcF4);
+    Check("dc float 3.14 CDAB", "3.14", dcF4);
+    Check("dc reorder 64-bit CDAB", "07 08 05 06 03 04 01 02", Hx(DataConvert.Reorder(H("01 02 03 04 05 06 07 08"), ByteOrder.CDAB)));
+    Check("dc reorder 64-bit BADC", "02 01 04 03 06 05 08 07", Hx(DataConvert.Reorder(H("01 02 03 04 05 06 07 08"), ByteOrder.BADC)));
+    Check("dc reorder 16-bit CDAB unchanged", "01 02", Hx(DataConvert.Reorder(H("01 02"), ByteOrder.CDAB)));
+    bool dcInvol = true;
+    foreach (var o in DataConvert.AllOrders)
+        foreach (var len in new[] { 2, 4, 8 })
+        {
+            var src = Enumerable.Range(1, len).Select(x => (byte)x).ToArray();
+            if (!DataConvert.Reorder(DataConvert.Reorder(src, o), o).SequenceEqual(src)) dcInvol = false;
+        }
+    CheckTrue("dc reorder is involution", dcInvol);
+    bool dcRound = true;
+    foreach (var t in DataConvert.AllTypes)
+        foreach (var o in DataConvert.AllOrders)
+        {
+            string v = t is NumType.Float or NumType.Double ? "-12.5" : t.ToString().StartsWith("U") ? "200" : "-100";
+            if (!DataConvert.TryEncode(t, v, o, out var dcEncR, out _) || !DataConvert.TryDecode(t, dcEncR, o, out var dec) || dec != v) { dcRound = false; Console.WriteLine($"  round fail {t} {o}"); }
+        }
+    CheckTrue("dc all types × orders round trip", dcRound);
+    Check("dc endian swap 4", "04 03 02 01 08 07 06 05 09", Hx(DataConvert.EndianSwap(H("01 02 03 04 05 06 07 08 09"), 4)));
+    Check("dc endian swap 2", "02 01 04 03", Hx(DataConvert.EndianSwap(H("01 02 03 04"), 2)));
+    var dcGbk = EncodingUtil.Get("GBK");
+    DataConvert.TryParse("中A", ByteFormat.Text, dcGbk, out var dcT1, out _);
+    Check("dc GBK text → hex", "D6 D0 41", Hx(dcT1));
+    DataConvert.TryParse("中A", ByteFormat.Text, new UTF8Encoding(false), out var dcT2, out _);
+    Check("dc UTF-8 text → hex", "E4 B8 AD 41", Hx(dcT2));
+    Check("dc hex → GBK text", "中A", DataConvert.Format(H("D6 D0 41"), ByteFormat.Text, dcGbk));
+    DataConvert.TryParse("1,2 255;-1", ByteFormat.Decimal, dcGbk, out var dcDec, out _);
+    Check("dc decimal list", "01 02 FF FF", Hx(dcDec));
+    CheckTrue("dc decimal 256 rejected", !DataConvert.TryParse("256", ByteFormat.Decimal, dcGbk, out _, out _));
+    Check("dc format decimal", "1 2 255", DataConvert.Format(H("01 02 FF"), ByteFormat.Decimal, dcGbk));
+    DataConvert.TryParse("00001111 0b11110000", ByteFormat.Binary, dcGbk, out var dcBin, out _);
+    Check("dc binary parse", "0F F0", Hx(dcBin));
+    DataConvert.TryParse("0000000111111111", ByteFormat.Binary, dcGbk, out var dcBin2, out _);
+    Check("dc binary 16-bit run", "01 FF", Hx(dcBin2));
+    Check("dc format binary", "00001010 11111111", DataConvert.Format(H("0A FF"), ByteFormat.Binary, dcGbk));
+    DataConvert.TryParse("0x01,AABB 3", ByteFormat.Hex, dcGbk, out var dcHex, out _);
+    Check("dc hex flexible", "01 AA BB 03", Hx(dcHex));
+    CheckTrue("dc hex odd rejected", !DataConvert.TryParse("ABC", ByteFormat.Hex, dcGbk, out _, out _));
+    Check("dc decode array int16", "1,-1,256", string.Join(",", DataConvert.DecodeArray(NumType.Int16, H("00 01 FF FF 01 00 07"), ByteOrder.ABCD)));
+}
+
+// ====================== v1.8：加密 / 编码计算器 ======================
+{
+    var ccK128 = H("2b7e151628aed2a6abf7158809cf4f3c");
+    var ccK192 = H("8e73b0f7da0e6452c810f32b809079e562f8ead2522c6b7b");
+    var ccK256 = H("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4");
+    var ccPt = H("6bc1bee22e409f96e93d7e117393172a ae2d8a571e03ac9c9eb76fac45af8e51");
+    var ccIv = H("000102030405060708090a0b0c0d0e0f");
+    var ccCtr = H("f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff");
+    string HL(byte[] b) => string.Concat(b.Select(x => x.ToString("x2")));
+    Check("aes128 ecb NIST", "3ad77bb40d7a3660a89ecaf32466ef97f5d3d58503b9699de785895a96fdbaaf", HL(CryptoCalc.AesEncrypt(ccK128, Array.Empty<byte>(), ccPt, CipherMode2.ECB, PadMode.None)));
+    Check("aes192 ecb NIST", "bd334f1d6e45f25ff712a214571fa5cc974104846d0ad3ad7734ecb3ecee4eef", HL(CryptoCalc.AesEncrypt(ccK192, Array.Empty<byte>(), ccPt, CipherMode2.ECB, PadMode.None)));
+    Check("aes256 ecb NIST", "f3eed1bdb5d2a03c064b5a7e3db181f8591ccb10d410ed26dc5ba74a31362870", HL(CryptoCalc.AesEncrypt(ccK256, Array.Empty<byte>(), ccPt, CipherMode2.ECB, PadMode.None)));
+    Check("aes128 cbc NIST", "7649abac8119b246cee98e9b12e9197d5086cb9b507219ee95db113a917678b2", HL(CryptoCalc.AesEncrypt(ccK128, ccIv, ccPt, CipherMode2.CBC, PadMode.None)));
+    Check("aes256 cbc NIST", "f58c4c04d6e5f1ba779eabfb5f7bfbd69cfc4e967edb808d679f777bc6702c7d", HL(CryptoCalc.AesEncrypt(ccK256, ccIv, ccPt, CipherMode2.CBC, PadMode.None)));
+    Check("aes128 ctr NIST", "874d6191b620e3261bef6864990db6ce9806f66b7970fdff8617187bb9fffdff", HL(CryptoCalc.AesEncrypt(ccK128, ccCtr, ccPt, CipherMode2.CTR, PadMode.None)));
+    Check("aes192 ctr NIST", "1abc932417521ca24f2b0459fe7e6e0b090339ec0aa6faefd5ccc2c6f4ce8e94", HL(CryptoCalc.AesEncrypt(ccK192, ccCtr, ccPt, CipherMode2.CTR, PadMode.None)));
+    Check("aes256 ctr NIST", "601ec313775789a5b7a7f504bbf3d228f443e3ca4d62b59aca84e990cacaf5c5", HL(CryptoCalc.AesEncrypt(ccK256, ccCtr, ccPt, CipherMode2.CTR, PadMode.None)));
+    Check("aes128 cbc NIST decrypt", HL(ccPt), HL(CryptoCalc.AesDecrypt(ccK128, ccIv, H("7649abac8119b246cee98e9b12e9197d5086cb9b507219ee95db113a917678b2"), CipherMode2.CBC, PadMode.None)));
+    Check("aes ctr partial block", "874d6191b6", HL(CryptoCalc.AesEncrypt(ccK128, ccCtr, ccPt.Take(5).ToArray(), CipherMode2.CTR, PadMode.PKCS7)));
+    var ccMsg = A("hello, serial");
+    var ccEnc = CryptoCalc.AesEncrypt(ccK128, ccIv, ccMsg, CipherMode2.CBC, PadMode.PKCS7);
+    CheckTrue("aes pkcs7 length 16", ccEnc.Length == 16);
+    Check("aes pkcs7 round trip", "hello, serial", Encoding.ASCII.GetString(CryptoCalc.AesDecrypt(ccK128, ccIv, ccEnc, CipherMode2.CBC, PadMode.PKCS7)));
+    CheckTrue("aes pkcs7 full block adds block", CryptoCalc.AesEncrypt(ccK128, ccIv, new byte[16], CipherMode2.ECB, PadMode.PKCS7).Length == 32);
+    var ccZ = CryptoCalc.AesEncrypt(ccK256, ccIv, ccMsg, CipherMode2.ECB, PadMode.Zero);
+    Check("aes zero pad round trip", "hello, serial", Encoding.ASCII.GetString(CryptoCalc.AesDecrypt(ccK256, ccIv, ccZ, CipherMode2.ECB, PadMode.Zero)));
+    bool ccThrowLen = false; try { CryptoCalc.AesEncrypt(H("01 02"), ccIv, ccMsg, CipherMode2.ECB, PadMode.PKCS7); } catch (ArgumentException) { ccThrowLen = true; }
+    CheckTrue("aes bad key length", ccThrowLen);
+    bool ccThrowNone = false; try { CryptoCalc.AesEncrypt(ccK128, ccIv, ccMsg, CipherMode2.ECB, PadMode.None); } catch (ArgumentException) { ccThrowNone = true; }
+    CheckTrue("aes none padding needs block multiple", ccThrowNone);
+    bool ccThrowPad = false; try { CryptoCalc.AesDecrypt(H("000102030405060708090a0b0c0d0e0f"), ccIv, ccEnc, CipherMode2.CBC, PadMode.PKCS7); } catch (System.Security.Cryptography.CryptographicException) { ccThrowPad = true; }
+    CheckTrue("aes wrong key → padding error", ccThrowPad);
+
+    var ccCheck = A("123456789");
+    foreach (var c in CryptoCalc.Crcs)
+        Check($"crc check {c.Name}", c.Format(c.Check), c.Format(c.Compute(ccCheck)));
+    Check("crc32 123456789", "CBF43926", CryptoCalc.FindCrc("CRC-32")!.Format(CryptoCalc.FindCrc("CRC-32")!.Compute(ccCheck)));
+    Check("crc32c 123456789", "E3069283", CryptoCalc.FindCrc("CRC-32C (Castagnoli)")!.Format(CryptoCalc.FindCrc("CRC-32C (Castagnoli)")!.Compute(ccCheck)));
+    var ccModbus = CryptoCalc.FindCrc("CRC-16/MODBUS")!;
+    Check("crc16 modbus matches Checksum (LE bytes)", Hx(Checksum.Compute(ChecksumKind.ModbusCrc16, H("01 03 00 00 00 0A"))), Hx(ccModbus.ToBytes(ccModbus.Compute(H("01 03 00 00 00 0A")), true)));
+    Check("crc32 empty", "00000000", CryptoCalc.FindCrc("CRC-32")!.Format(CryptoCalc.FindCrc("CRC-32")!.Compute(Array.Empty<byte>())));
+
+    Check("md5 abc", "900150983cd24fb0d6963f7d28e17f72", HL(CryptoCalc.Md5(A("abc"))));
+    Check("sha1 abc", "a9993e364706816aba3e25717850c26c9cd0d89d", HL(CryptoCalc.Sha1(A("abc"))));
+    Check("sha256 abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", HL(CryptoCalc.Sha256(A("abc"))));
+    Check("sha256 empty", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", HL(CryptoCalc.Sha256(Array.Empty<byte>())));
+    Check("sha256 448-bit", "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1", HL(CryptoCalc.Sha256(A("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"))));
+
+    Check("base64 encode", "aGVsbG8=", CryptoCalc.Base64Encode(A("hello")));
+    Check("base64 decode no pad", "hello", Encoding.ASCII.GetString(CryptoCalc.Base64Decode("aGVsbG8")));
+    Check("base64 decode url-safe", "FB FF", Hx(CryptoCalc.Base64Decode("-_8=")));
+    bool ccB64Bad = false; try { CryptoCalc.Base64Decode("a"); } catch (FormatException) { ccB64Bad = true; }
+    CheckTrue("base64 bad length", ccB64Bad);
+    Check("url encode utf8", "a%20b%26%E4%B8%AD~", CryptoCalc.UrlEncode("a b&中~", new UTF8Encoding(false)));
+    Check("url decode", "a b&中", CryptoCalc.UrlDecode("a+b%26%E4%B8%AD", new UTF8Encoding(false)));
+    Check("url decode gbk", "中", CryptoCalc.UrlDecode("%D6%D0", EncodingUtil.Get("GBK")));
+    Check("url decode keeps bad %", "100%", CryptoCalc.UrlDecode("100%", new UTF8Encoding(false)));
+    Check("xor key", "FE FD FC", Hx(CryptoCalc.Xor(H("01 02 03"), H("FF"))));
+    Check("xor repeating key", "00 00 02 06", Hx(CryptoCalc.Xor(H("01 02 03 04"), H("01 02"))));
+    Check("xor all (BCC)", "04", CryptoCalc.XorAll(H("01 02 03 04")).ToString("X2"));
+    Check("bcd encode odd", "01 23 45", Hx(CryptoCalc.BcdEncode("12345")));
+    Check("bcd decode", "1234", CryptoCalc.BcdDecode(H("12 34")));
+    bool ccBcdBad = false; try { CryptoCalc.BcdDecode(H("1A")); } catch (FormatException) { ccBcdBad = true; }
+    CheckTrue("bcd invalid nibble", ccBcdBad);
+}
+
+// ====================== v1.8：接收触发 ======================
+{
+    var trT0 = new DateTime(2026, 1, 1, 12, 0, 0);
+    var trOk = new TriggerRule { Name = "ok", Pattern = "OK", CooldownMs = 1000, Actions = { new TriggerAction { Kind = TriggerActionKind.Toast } } };
+    var trHex = new TriggerRule { Name = "hex", Pattern = "AA 55", IsHex = true, CooldownMs = 0, Actions = { new TriggerAction { Kind = TriggerActionKind.Snapshot } } };
+    var trRe = new TriggerRule { Name = "re", Pattern = @"temp=\d+", IsRegex = true, CooldownMs = 0, Actions = { new TriggerAction { Kind = TriggerActionKind.Sound } } };
+    var trOff = new TriggerRule { Name = "off", Pattern = "OK", Enabled = false, Actions = { new TriggerAction { Kind = TriggerActionKind.ClosePort } } };
+    var trNoAct = new TriggerRule { Name = "noact", Pattern = "OK" };
+    var trEng = new TriggerEngine();
+    trEng.SetRules(new[] { trOk, trHex, trRe, trOff, trNoAct }, new UTF8Encoding(false));
+    var trH1 = trEng.Push(A("xxOK\r\n"), trT0);
+    CheckTrue("trigger text match", trH1.Count == 1 && trH1[0].Rule == trOk && trH1[0].Count == 1);
+    CheckTrue("trigger disabled / no-action rules ignored", trOff.HitCount == 0 && trNoAct.HitCount == 0 && !trNoAct.IsUsable);
+    CheckTrue("trigger cooldown suppresses", trEng.Push(A("OK"), trT0.AddMilliseconds(300)).Count == 0 && trOk.HitCount == 1 && trEng.Suppressed >= 1);
+    var trH2 = trEng.Push(A("OK"), trT0.AddMilliseconds(1500));
+    CheckTrue("trigger fires after cooldown", trH2.Count == 1 && trOk.HitCount == 2 && trH2[0].Count == 2);
+    CheckTrue("trigger same bytes not re-matched", trEng.Push(A("zz"), trT0.AddMilliseconds(5000)).Count == 0);
+    trEng.Push(A("O"), trT0.AddSeconds(10));
+    CheckTrue("trigger split across chunks", trEng.Push(A("K"), trT0.AddSeconds(10.01)).Any(h => h.Rule == trOk));
+    CheckTrue("trigger hex", trEng.Push(H("01 AA 55 02"), trT0.AddSeconds(20)).Any(h => h.Rule == trHex));
+    CheckTrue("trigger hex split", trEng.Push(H("AA"), trT0.AddSeconds(21)).Count == 0 && trEng.Push(H("55"), trT0.AddSeconds(21)).Any(h => h.Rule == trHex));
+    CheckTrue("trigger regex", trEng.Push(A("temp=42\n"), trT0.AddSeconds(30)).Any(h => h.Rule == trRe));
+    CheckTrue("trigger hit count + last hit", trHex.HitCount == 2 && trRe.HitCount == 1 && trRe.LastHit == trT0.AddSeconds(30));
+    var trBad = new TriggerRule { Pattern = "([", IsRegex = true, Actions = { new TriggerAction() } };
+    var trEng2 = new TriggerEngine();
+    trEng2.SetRules(new[] { trBad }, Encoding.ASCII);
+    CheckTrue("trigger invalid regex reported", trEng2.Errors.ContainsKey(0) && trEng2.Push(A("(["), trT0).Count == 0);
+    var trIc = new TriggerRule { Pattern = "error", IgnoreCase = true, CooldownMs = 0, Actions = { new TriggerAction() } };
+    var trEng3 = new TriggerEngine();
+    trEng3.SetRules(new[] { trIc }, Encoding.ASCII);
+    CheckTrue("trigger ignore case", trEng3.Push(A("FATAL ERROR"), trT0).Count == 1);
+    // 与自动回复相互独立：自动回复引擎看不到触发规则
+    var trAr = new AutoReplyEngine();
+    trAr.SetRules(new List<CompiledRule> { new CompiledRule(new HighlightRule { Pattern = "OK", ReplyEnabled = false }, 0, Encoding.ASCII) });
+    CheckTrue("trigger independent from auto-reply", trAr.Push(A("OK"), trT0).Count == 0 && new TriggerEngine().Push(A("OK"), trT0).Count == 0);
+    Check("trigger expand", "ok 第 3 次 12:00:00", TriggerEngine.Expand("{rule} 第 {count} 次 {time}", new TriggerHit(trOk, 3, trT0)));
+    CheckTrue("trigger expand default", TriggerEngine.Expand("", new TriggerHit(trOk, 1, trT0)).Contains("ok"));
+    var trPath = Path.Combine(Path.GetTempPath(), "trig_" + Guid.NewGuid().ToString("N") + ".json");
+    TriggerRuleStore.Save(trPath, new[] { trOk, trHex });
+    var trLoaded = TriggerRuleStore.Load(trPath);
+    CheckTrue("trigger store round trip", trLoaded.Count == 2 && trLoaded[0].Pattern == "OK" && trLoaded[0].HitCount == trOk.HitCount && trLoaded[1].IsHex && trLoaded[1].Actions[0].Kind == TriggerActionKind.Snapshot);
+    CheckTrue("trigger store enum as string", File.ReadAllText(trPath).Contains("\"Snapshot\""));
+    TriggerRuleStore.Save(trPath, new[] { trRe });
+    CheckTrue("trigger store overwrite", TriggerRuleStore.Load(trPath).Count == 1);
+    try { File.Delete(trPath); } catch { }
+    CheckTrue("trigger store missing → samples", TriggerRuleStore.Load(trPath + ".none").Count >= 1);
+    var trClone = trOk.Clone(); trClone.Actions[0].Param = "x";
+    CheckTrue("trigger clone deep", trOk.Actions[0].Param == "");
+}
+
+// ====================== v1.8：检查更新 ======================
+{
+    CheckTrue("ver 1.8.0 > 1.7.0", UpdateChecker.Compare("v1.8.0", "1.7.0") > 0);
+    CheckTrue("ver 1.8 == 1.8.0", UpdateChecker.Compare("1.8", "v1.8.0") == 0);
+    CheckTrue("ver 1.10.0 > 1.9.9", UpdateChecker.Compare("1.10.0", "1.9.9") > 0);
+    CheckTrue("ver beta < release", UpdateChecker.Compare("1.8.0-beta", "1.8.0") < 0);
+    CheckTrue("ver beta < rc", UpdateChecker.Compare("1.8.0-beta", "1.8.0-rc") < 0);
+    CheckTrue("ver build metadata ignored", UpdateChecker.Compare("1.8.0+abc", "1.8.0") == 0);
+    CheckTrue("ver IsNewer false when same", !UpdateChecker.IsNewer("V1.7.0", "1.7.0.0"));
+    CheckTrue("ver older", UpdateChecker.Compare("1.2.9", "1.3") < 0);
+    string upJson = @"{""tag_name"":""v1.9.0"",""name"":""SerialTool v1.9.0"",""body"":""## 新功能\n- 测试"",""html_url"":""https://github.com/baogj/SerialTool/releases/tag/v1.9.0"",""draft"":false,""prerelease"":false,""published_at"":""2026-10-01T08:00:00Z"",
+        ""assets"":[{""name"":""SerialTool.exe"",""size"":70000000,""browser_download_url"":""https://github.com/baogj/SerialTool/releases/download/v1.9.0/SerialTool.exe""},
+                    {""name"":""SerialTool-lite.exe"",""size"":3000000,""browser_download_url"":""https://github.com/baogj/SerialTool/releases/download/v1.9.0/SerialTool-lite.exe""}]}";
+    var upRel = UpdateChecker.ParseRelease(upJson);
+    CheckTrue("release parse", upRel.TagName == "v1.9.0" && upRel.Version == "1.9.0" && upRel.Body.Contains("新功能") && upRel.Assets.Count == 2 && upRel.PublishedAt.HasValue);
+    CheckTrue("release pick full", UpdateChecker.PickAsset(upRel, false)?.Name == "SerialTool.exe" && UpdateChecker.PickAsset(upRel, false)!.Size == 70000000);
+    CheckTrue("release pick lite", UpdateChecker.PickAsset(upRel, true)?.Name == "SerialTool-lite.exe");
+    CheckTrue("release no lite asset → null", UpdateChecker.PickAsset(UpdateChecker.ParseRelease(@"{""tag_name"":""v1"",""assets"":[{""name"":""SerialTool.exe"",""browser_download_url"":""x""}]}"), true) == null);
+    string upErr = "";
+    try { UpdateChecker.ParseRelease(@"{""message"":""Not Found""}"); } catch (FormatException ex) { upErr = ex.Message; }
+    CheckTrue("release error message", upErr.Contains("Not Found"));
+    var upList = UpdateChecker.ParseRelease(@"[{""tag_name"":""v2.0.0-beta"",""prerelease"":true},{""tag_name"":""v1.9.1""}]");
+    CheckTrue("release list skips prerelease", upList.TagName == "v1.9.1");
+    var upCands = UpdateChecker.CandidateUrls("https://github.com/a/b.exe");
+    CheckTrue("mirror url", upCands.Count == 2 && upCands[1] == "https://ghproxy.net/https://github.com/a/b.exe");
+    var upNow = new DateTime(2026, 10, 27, 9, 0, 0);
+    CheckTrue("auto check off by default flag", !UpdateChecker.ShouldAutoCheck(false, null, upNow));
+    CheckTrue("auto check first time", UpdateChecker.ShouldAutoCheck(true, null, upNow));
+    CheckTrue("auto check once per day", !UpdateChecker.ShouldAutoCheck(true, upNow.AddHours(-23), upNow) && UpdateChecker.ShouldAutoCheck(true, upNow.AddHours(-24), upNow));
+    CheckTrue("lite flag false in net8 tests", !UpdateChecker.IsLiteBuild);
+
+    // 本地 HTTP 服务：第一个地址 404，镜像地址成功
+    int upPort;
+    { var tl = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0); tl.Start(); upPort = ((System.Net.IPEndPoint)tl.LocalEndpoint).Port; tl.Stop(); }
+    var upPayload = Enumerable.Range(0, 300_000).Select(i => (byte)(i * 7)).ToArray();
+    var upListener = new System.Net.HttpListener();
+    upListener.Prefixes.Add($"http://127.0.0.1:{upPort}/");
+    upListener.Start();
+    var upServer = Task.Run(async () =>
+    {
+        while (upListener.IsListening)
+        {
+            System.Net.HttpListenerContext ctx;
+            try { ctx = await upListener.GetContextAsync(); } catch { break; }
+            string p = ctx.Request.Url!.AbsolutePath;
+            if (p == "/good.exe")
+            {
+                ctx.Response.ContentLength64 = upPayload.Length;
+                await ctx.Response.OutputStream.WriteAsync(upPayload, 0, upPayload.Length);
+            }
+            else if (p == "/latest")
+            {
+                var b = Encoding.UTF8.GetBytes(upJson);
+                ctx.Response.ContentType = "application/json";
+                await ctx.Response.OutputStream.WriteAsync(b, 0, b.Length);
+            }
+            else ctx.Response.StatusCode = 404;
+            ctx.Response.Close();
+        }
+    });
+    using var upClient = UpdateChecker.CreateClient(TimeSpan.FromSeconds(10));
+    var upFetched = await UpdateChecker.FetchLatestAsync(upClient, $"http://127.0.0.1:{upPort}/latest");
+    CheckTrue("fetch latest via http", upFetched.TagName == "v1.9.0");
+    string upFetchErr = "";
+    try { await UpdateChecker.FetchLatestAsync(upClient, $"http://127.0.0.1:{upPort}/nope"); } catch (System.Net.Http.HttpRequestException ex) { upFetchErr = ex.Message; }
+    CheckTrue("fetch latest 404 error", upFetchErr.Contains("404"));
+    var upDir = Path.Combine(Path.GetTempPath(), "upd_" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(upDir);
+    var upDest = Path.Combine(upDir, "new.exe");
+    long upLastProg = 0;
+    var upUsed = await UpdateChecker.DownloadAsync(upClient, new[] { $"http://127.0.0.1:{upPort}/missing.exe", $"http://127.0.0.1:{upPort}/good.exe" }, upPayload.Length, upDest,
+        new SyncProgress<(long done, long total, string url)>(p => upLastProg = p.done));
+    CheckTrue("download falls back to mirror", upUsed.EndsWith("/good.exe") && File.ReadAllBytes(upDest).SequenceEqual(upPayload));
+    CheckTrue("download progress reported", upLastProg == upPayload.Length);
+    CheckTrue("download no .part left", !File.Exists(upDest + ".part"));
+    bool upSizeFail = false;
+    try { await UpdateChecker.DownloadAsync(upClient, new[] { $"http://127.0.0.1:{upPort}/good.exe" }, 12345, Path.Combine(upDir, "bad.exe")); }
+    catch (IOException ex) { upSizeFail = ex.Message.Contains("12345"); }
+    CheckTrue("download size mismatch rejected", upSizeFail && !File.Exists(Path.Combine(upDir, "bad.exe")));
+    bool upOffline = false;
+    try { await UpdateChecker.DownloadAsync(upClient, new[] { "http://127.0.0.1:1/x.exe" }, 0, Path.Combine(upDir, "off.exe")); }
+    catch (IOException) { upOffline = true; }
+    CheckTrue("download offline → IOException", upOffline);
+    upListener.Stop();
+    upListener.Close();
+
+    var upCur = Path.Combine(upDir, "SerialTool.exe");
+    File.WriteAllText(upCur, "old");
+    File.WriteAllText(upDest, "new");
+    var upOld = UpdateChecker.ReplaceExecutable(upCur, upDest);
+    CheckTrue("replace exe", File.ReadAllText(upCur) == "new" && File.ReadAllText(upOld) == "old" && upOld.EndsWith(".old") && !File.Exists(upDest));
+    CheckTrue("cleanup .old", UpdateChecker.CleanupOld(upCur) == 1 && !File.Exists(upOld) && File.Exists(upCur));
+    bool upRollback = false;
+    try { UpdateChecker.ReplaceExecutable(upCur, Path.Combine(upDir, "does-not-exist.exe")); } catch { upRollback = File.ReadAllText(upCur) == "new"; }
+    CheckTrue("replace rollback on failure", upRollback);
+    try { Directory.Delete(upDir, true); } catch { }
+}
+
+// ====================== v1.8：数据对比 ======================
+{
+    var dfR1 = DataDiff.CompareBytes(H("01 02 03 04 05"), H("01 02 FF 04 05 06"));
+    CheckTrue("diff bytes hunks", dfR1.Hunks.Count == 2 && dfR1.Hunks[0] == new DiffHunk(2, 1, 2, 1) && dfR1.Hunks[1] == new DiffHunk(5, 0, 5, 1));
+    CheckTrue("diff bytes counts", dfR1.DifferingCount == 2 && dfR1.ChangedA == 1 && dfR1.ChangedB == 2 && !dfR1.Approximate);
+    CheckTrue("diff identical", DataDiff.CompareBytes(H("01 02"), H("01 02")).Identical);
+    CheckTrue("diff empty vs data", DataDiff.CompareBytes(Array.Empty<byte>(), H("01 02")).Hunks.Single() == new DiffHunk(0, 0, 0, 2));
+    var dfIns = DataDiff.CompareBytes(H("01 02 03"), H("01 09 02 03"));
+    CheckTrue("diff aligned insert", dfIns.Hunks.Count == 1 && dfIns.Hunks[0] == new DiffHunk(1, 0, 1, 1) && dfIns.DifferingCount == 1);
+    var dfPos = DataDiff.CompareBytes(H("01 02 03"), H("01 09 02 03"), align: false);
+    CheckTrue("diff positional", dfPos.DifferingCount == 3 && dfPos.Hunks.Count == 1 && dfPos.Hunks[0] == new DiffHunk(1, 2, 1, 3));
+    var dfPos2 = DataDiff.CompareBytes(H("01 02 03 04"), H("01 FF 03 FF"), align: false);
+    CheckTrue("diff positional separate hunks", dfPos2.Hunks.Count == 2 && dfPos2.DifferingCount == 2);
+    var dfL = DataDiff.CompareLines(DataDiff.SplitLines("a\nb\nc\n"), DataDiff.SplitLines("a\r\nx\r\nc\r\nd"));
+    CheckTrue("diff lines", dfL.Hunks.Count == 2 && dfL.Hunks[0] == new DiffHunk(1, 1, 1, 1) && dfL.Hunks[1] == new DiffHunk(3, 0, 3, 1) && dfL.LengthA == 3);
+    CheckTrue("diff lines ignore case/space", DataDiff.CompareLines(new[] { "Hello World" }, new[] { "hello  world" }, ignoreCase: true, ignoreWhitespace: true).Identical);
+    var dfRng = new Random(1234);
+    bool dfOk = true;
+    for (int it = 0; it < 300 && dfOk; it++)
+    {
+        var a = Enumerable.Range(0, dfRng.Next(0, 40)).Select(_ => dfRng.Next(0, 4)).ToArray();
+        var b = Enumerable.Range(0, dfRng.Next(0, 40)).Select(_ => dfRng.Next(0, 4)).ToArray();
+        var r = DataDiff.Compare(a, b);
+        if (!DataDiff.Apply(a, b, r).SequenceEqual(b)) { dfOk = false; Console.WriteLine($"  apply fail {it}"); break; }
+        var lcs = new int[a.Length + 1, b.Length + 1];
+        for (int i = a.Length - 1; i >= 0; i--)
+            for (int j = b.Length - 1; j >= 0; j--)
+                lcs[i, j] = a[i] == b[j] ? lcs[i + 1, j + 1] + 1 : Math.Max(lcs[i + 1, j], lcs[i, j + 1]);
+        if (r.ChangedA + r.ChangedB != a.Length + b.Length - 2 * lcs[0, 0]) { dfOk = false; Console.WriteLine($"  not minimal {it}"); }
+        for (int h = 1; h < r.Hunks.Count; h++)
+            if (r.Hunks[h].AStart < r.Hunks[h - 1].AStart + r.Hunks[h - 1].ALen) dfOk = false;
+    }
+    CheckTrue("diff random: apply == B and minimal (vs LCS DP)", dfOk);
+    var dfBigA = Enumerable.Range(0, 2000).Select(i => (byte)dfRng.Next(256)).ToArray();
+    var dfBigB = Enumerable.Range(0, 2000).Select(i => (byte)dfRng.Next(256)).ToArray();
+    var dfApprox = DataDiff.CompareBytes(dfBigA, dfBigB, maxEdits: 50);
+    CheckTrue("diff falls back when too many edits", dfApprox.Approximate && DataDiff.Apply(dfBigA.Select(x => (int)x).ToArray(), dfBigB.Select(x => (int)x).ToArray(), dfApprox).SequenceEqual(dfBigB.Select(x => (int)x)));
+    var dfLarge = new byte[200_000]; dfRng.NextBytes(dfLarge);
+    var dfLarge2 = (byte[])dfLarge.Clone(); dfLarge2[1000] ^= 1; dfLarge2[150_000] ^= 1;
+    var dfSw = System.Diagnostics.Stopwatch.StartNew();
+    var dfLr = DataDiff.CompareBytes(dfLarge, dfLarge2);
+    CheckTrue($"diff 200KB two changes fast ({dfSw.ElapsedMilliseconds} ms)", dfLr.DifferingCount == 2 && dfLr.Hunks.Count == 2 && !dfLr.Approximate && dfSw.ElapsedMilliseconds < 5000);
+    CheckTrue("diff navigate", DataDiff.Navigate(3, -1, true) == 0 && DataDiff.Navigate(3, 2, true) == 0 && DataDiff.Navigate(3, 0, false) == 2 && DataDiff.Navigate(0, 0, true) == -1);
+}
+
 Console.WriteLine($"\n结果：{pass} 通过，{fail} 失败");
 return fail == 0 ? 0 : 1;
 
@@ -1307,4 +1647,11 @@ sealed class FakeChannel : IByteChannel
         });
         return true;
     }
+}
+
+sealed class SyncProgress<T> : IProgress<T>
+{
+    private readonly Action<T> _a;
+    public SyncProgress(Action<T> a) => _a = a;
+    public void Report(T value) => _a(value);
 }

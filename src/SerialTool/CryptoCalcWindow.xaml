@@ -1,0 +1,93 @@
+<Window x:Class="SerialTool.CryptoCalcWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="加密 / 编码计算器" Width="860" Height="700" MinWidth="680" MinHeight="520"
+        WindowStartupLocation="CenterOwner" Background="{DynamicResource WindowBgBrush}"
+        Foreground="{DynamicResource TextBrush}" FontFamily="Microsoft YaHei UI" FontSize="13">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <Border Style="{StaticResource Card}">
+            <StackPanel>
+                <WrapPanel>
+                    <TextBlock Text="运算" Style="{StaticResource FieldLabel}"/>
+                    <ComboBox x:Name="OpCombo" Width="210" SelectionChanged="Op_Changed" Margin="0,0,12,0"/>
+                    <TextBlock Text="文本编码" Style="{StaticResource FieldLabel}"/>
+                    <ComboBox x:Name="EncCombo" Width="80" SelectionChanged="Any_Changed"/>
+                </WrapPanel>
+                <!-- CRC 参数 -->
+                <WrapPanel x:Name="CrcPanel" Margin="0,8,0,0">
+                    <TextBlock Text="CRC 算法" Style="{StaticResource FieldLabel}"/>
+                    <ComboBox x:Name="CrcCombo" Width="200" SelectionChanged="Any_Changed" Margin="0,0,12,0"/>
+                    <TextBlock Text="输出字节序" Style="{StaticResource FieldLabel}"/>
+                    <ComboBox x:Name="CrcOrderCombo" Width="110" SelectionChanged="Any_Changed"/>
+                    <TextBlock x:Name="CrcInfo" Style="{StaticResource MutedText}" Margin="12,0,0,0" VerticalAlignment="Center"/>
+                </WrapPanel>
+                <!-- AES 参数 -->
+                <Grid x:Name="AesPanel" Margin="0,8,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="60"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <TextBlock Text="密钥" Style="{StaticResource FieldLabel}"/>
+                    <TextBox x:Name="KeyBox" Grid.Column="1" Style="{StaticResource FieldBox}" FontFamily="{StaticResource MonoFont}" TextChanged="Any_TextChanged" Margin="0,2"
+                             Text="2B 7E 15 16 28 AE D2 A6 AB F7 15 88 09 CF 4F 3C"/>
+                    <ComboBox x:Name="KeyFmtCombo" Grid.Column="2" Width="70" Margin="6,2,0,2" SelectionChanged="Any_Changed"/>
+                    <TextBlock Grid.Row="1" Text="IV" Style="{StaticResource FieldLabel}"/>
+                    <TextBox x:Name="IvBox" Grid.Row="1" Grid.Column="1" Style="{StaticResource FieldBox}" FontFamily="{StaticResource MonoFont}" TextChanged="Any_TextChanged" Margin="0,2"
+                             Text="00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F" ToolTip="CBC 的初始向量 / CTR 的初始计数器（16 字节）；ECB 忽略"/>
+                    <ComboBox x:Name="IvFmtCombo" Grid.Row="1" Grid.Column="2" Width="70" Margin="6,2,0,2" SelectionChanged="Any_Changed"/>
+                    <WrapPanel Grid.Row="2" Grid.Column="1" Margin="0,4,0,0">
+                        <TextBlock Text="模式" Style="{StaticResource FieldLabel}"/>
+                        <ComboBox x:Name="ModeCombo" Width="80" SelectionChanged="Any_Changed" Margin="0,0,12,0"/>
+                        <TextBlock Text="填充" Style="{StaticResource FieldLabel}"/>
+                        <ComboBox x:Name="PadCombo" Width="90" SelectionChanged="Any_Changed" Margin="0,0,12,0"/>
+                        <TextBlock x:Name="AesInfo" Style="{StaticResource MutedText}" VerticalAlignment="Center"/>
+                    </WrapPanel>
+                </Grid>
+                <!-- XOR 参数 -->
+                <WrapPanel x:Name="XorPanel" Margin="0,8,0,0">
+                    <TextBlock Text="XOR 密钥" Style="{StaticResource FieldLabel}"/>
+                    <TextBox x:Name="XorKeyBox" Width="300" Style="{StaticResource FieldBox}" FontFamily="{StaticResource MonoFont}" Text="5A" TextChanged="Any_TextChanged"/>
+                    <ComboBox x:Name="XorFmtCombo" Width="70" Margin="6,0,0,0" SelectionChanged="Any_Changed"/>
+                    <TextBlock Text="（密钥循环使用）" Style="{StaticResource MutedText}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                </WrapPanel>
+            </StackPanel>
+        </Border>
+
+        <DockPanel Grid.Row="1" Margin="0,10,0,0">
+            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <TextBlock Text="输入格式" Style="{StaticResource FieldLabel}"/>
+                    <ComboBox x:Name="InFmtCombo" Width="70" SelectionChanged="Any_Changed" Margin="0,0,6,0"/>
+                    <Button Content="粘贴" Style="{StaticResource SmallButton}" Click="Paste_Click" Margin="0,0,4,0"/>
+                    <Button Content="清空" Style="{StaticResource SmallButton}" Click="ClearIn_Click"/>
+                </StackPanel>
+                <TextBlock Text="输入" Style="{StaticResource CardTitle}" Margin="0"/>
+            </DockPanel>
+            <TextBox x:Name="InBox" Style="{StaticResource FieldBox}" FontFamily="{StaticResource MonoFont}" AcceptsReturn="True" TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" TextChanged="Any_TextChanged"/>
+        </DockPanel>
+
+        <TextBlock x:Name="ErrorText" Grid.Row="2" Foreground="{DynamicResource DangerBrush}" TextWrapping="Wrap" Margin="0,4"/>
+
+        <DockPanel Grid.Row="3">
+            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <TextBlock Text="输出格式" Style="{StaticResource FieldLabel}"/>
+                    <ComboBox x:Name="OutFmtCombo" Width="70" SelectionChanged="Any_Changed" Margin="0,0,6,0"/>
+                    <Button Content="复制" Style="{StaticResource SmallButton}" Click="CopyOut_Click" Margin="0,0,4,0"/>
+                    <Button Content="输出 → 输入" Style="{StaticResource SmallButton}" Click="OutToIn_Click"/>
+                </StackPanel>
+                <TextBlock Text="输出" Style="{StaticResource CardTitle}" Margin="0"/>
+                <TextBlock x:Name="OutInfo" Style="{StaticResource MutedText}" Margin="10,0,0,0" VerticalAlignment="Center"/>
+            </DockPanel>
+            <TextBox x:Name="OutBox" Style="{StaticResource FieldBox}" FontFamily="{StaticResource MonoFont}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"/>
+        </DockPanel>
+    </Grid>
+</Window>

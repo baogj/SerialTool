@@ -227,6 +227,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         UpdateChecksumPreview();
         InitControlsV15();
         InitControlsV16();
+        InitControlsV18();
     }
 
     private void CollectSettings()
@@ -265,6 +266,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         CollectSettingsV13();
         CollectSettingsV14();
         CollectSettingsV17();
+        CollectSettingsV18();
         CollectSettingsV16();
         CollectSettingsV15();
 
@@ -307,6 +309,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         InitV13();
         InitV14();
         InitV15();
+        InitV18();
         SetStatus("就绪。设置文件：" + SettingsStore.FilePath);
     }
 
@@ -320,6 +323,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         try { _script?.Stop(); } catch { /* ignore */ }
         try { ShutdownV13(); } catch (Exception ex) { App.LogCrash(ex); }
         try { ShutdownV14(); } catch (Exception ex) { App.LogCrash(ex); }
+        try { SaveMiniBounds(); } catch (Exception ex) { App.LogCrash(ex); }
         try
         {
             CollectSettings();
@@ -331,6 +335,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         }
         try { ShutdownV15(); } catch (Exception ex) { App.LogCrash(ex); }
         try { ShutdownV16(); } catch (Exception ex) { App.LogCrash(ex); }
+        try { ShutdownV18(); } catch (Exception ex) { App.LogCrash(ex); }
 
         var s = _conn;
         _conn = null;
@@ -826,9 +831,11 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
                 _waveBuf.Push(c);
                 waveDirty = true;
                 RecordChunk(c);
+                FeedV18(c);
 
                 if (!c.IsTx && !c.Replayed)
                 {
+                    PushTriggersRx(c.Data);
                     // 脚本 WAITFOR 只看接收数据（v1.1 误把发送回显也算进去）
                     try { _script?.FeedRx(CurrentEncoding().GetString(c.Data)); }
                     catch { /* ignore */ }
@@ -873,6 +880,7 @@ public partial class MainWindow : Window, Features.ScriptEngine.IHost
         FlushRecorders();
         FlushMonitors();
         FlushV14();
+        FlushV18();
         UpdateCounters();
     }
 

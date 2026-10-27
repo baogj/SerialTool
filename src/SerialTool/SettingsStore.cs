@@ -97,6 +97,11 @@ public static class SettingsStore
         if (s.CurveWindow < 50) s.CurveWindow = 500;
         s.FrameTemplateName ??= "";
         s.AsciiLineTemplateName ??= "";
+        if (double.IsNaN(s.WindowOpacity) || s.WindowOpacity < 0.3 || s.WindowOpacity > 1.0) s.WindowOpacity = 1.0;
+        if (s.MiniLines < 5 || s.MiniLines > 500) s.MiniLines = 30;
+        if (double.IsNaN(s.MiniWidth) || s.MiniWidth < 260 || s.MiniWidth > 4000) s.MiniWidth = 420;
+        if (double.IsNaN(s.MiniHeight) || s.MiniHeight < 180 || s.MiniHeight > 4000) s.MiniHeight = 300;
+        s.SkippedUpdateVersion ??= "";
         s.Slave ??= new ModbusSlaveSettings();
         s.Slave.Framing ??= "Rtu";
         if (s.Slave.SlaveId < 1 || s.Slave.SlaveId > 247) s.Slave.SlaveId = 1;

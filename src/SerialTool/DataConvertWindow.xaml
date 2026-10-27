@@ -1,0 +1,112 @@
+<Window x:Class="SerialTool.DataConvertWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="数据转换" Width="900" Height="760" MinWidth="700" MinHeight="560"
+        WindowStartupLocation="CenterOwner" Background="{DynamicResource WindowBgBrush}"
+        Foreground="{DynamicResource TextBrush}" FontFamily="Microsoft YaHei UI" FontSize="13">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="12">
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <DockPanel Margin="0,0,0,6">
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <TextBlock Text="文本编码" Style="{StaticResource FieldLabel}"/>
+                            <ComboBox x:Name="EncCombo" Width="90" SelectionChanged="EncCombo_SelectionChanged"/>
+                        </StackPanel>
+                        <TextBlock Text="字节表示（任意一栏输入，其余各栏实时同步）" Style="{StaticResource CardTitle}"/>
+                    </DockPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="70"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="HEX" Style="{StaticResource FieldLabel}"/>
+                        <TextBox x:Name="HexBox" Grid.Column="1" Style="{StaticResource FieldBox}" FontFamily="{StaticResource MonoFont}" Height="54"
+                                 TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextChanged="ByteBox_TextChanged" Margin="0,2"/>
+                        <Button Grid.Column="2" Content="复制" Style="{StaticResource SmallButton}" Tag="HexBox" Click="Copy_Click" Margin="6,2,0,2"/>
+
+                        <TextBlock Grid.Row="1" Text="文本" Style="{StaticResource FieldLabel}"/>
+                        <TextBox x:Name="TextBox1" Grid.Row="1" Grid.Column="1" Style="{StaticResource FieldBox}" Height="54"
+                                 TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextChanged="ByteBox_TextChanged" Margin="0,2"/>
+                        <Button Grid.Row="1" Grid.Column="2" Content="复制" Style="{StaticResource SmallButton}" Tag="TextBox1" Click="Copy_Click" Margin="6,2,0,2"/>
+
+                        <TextBlock Grid.Row="2" Text="十进制" Style="{StaticResource FieldLabel}"/>
+                        <TextBox x:Name="DecBox" Grid.Row="2" Grid.Column="1" Style="{StaticResource FieldBox}" FontFamily="{StaticResource MonoFont}" Height="54"
+                                 TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextChanged="ByteBox_TextChanged" Margin="0,2"/>
+                        <Button Grid.Row="2" Grid.Column="2" Content="复制" Style="{StaticResource SmallButton}" Tag="DecBox" Click="Copy_Click" Margin="6,2,0,2"/>
+
+                        <TextBlock Grid.Row="3" Text="二进制" Style="{StaticResource FieldLabel}"/>
+                        <TextBox x:Name="BinBox" Grid.Row="3" Grid.Column="1" Style="{StaticResource FieldBox}" FontFamily="{StaticResource MonoFont}" Height="54"
+                                 TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextChanged="ByteBox_TextChanged" Margin="0,2"/>
+                        <Button Grid.Row="3" Grid.Column="2" Content="复制" Style="{StaticResource SmallButton}" Tag="BinBox" Click="Copy_Click" Margin="6,2,0,2"/>
+                    </Grid>
+                    <WrapPanel Margin="0,6,0,0">
+                        <TextBlock Text="大小端互换：" Style="{StaticResource FieldLabel}"/>
+                        <Button Content="每 2 字节" Style="{StaticResource SmallButton}" Tag="2" Click="Swap_Click" Margin="0,0,4,0"/>
+                        <Button Content="每 4 字节" Style="{StaticResource SmallButton}" Tag="4" Click="Swap_Click" Margin="0,0,4,0"/>
+                        <Button Content="每 8 字节" Style="{StaticResource SmallButton}" Tag="8" Click="Swap_Click" Margin="0,0,4,0"/>
+                        <Button Content="整体反转" Style="{StaticResource SmallButton}" Tag="0" Click="Swap_Click" Margin="0,0,12,0"/>
+                        <Button Content="清空" Style="{StaticResource SmallButton}" Click="Clear_Click" Margin="0,0,12,0"/>
+                        <TextBlock x:Name="ByteInfo" Style="{StaticResource MutedText}" VerticalAlignment="Center"/>
+                    </WrapPanel>
+                    <TextBlock x:Name="ByteError" Foreground="{DynamicResource DangerBrush}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}" Margin="0,10,0,0">
+                <StackPanel>
+                    <TextBlock Text="数值 ↔ 字节（双向实时转换）" Style="{StaticResource CardTitle}"/>
+                    <WrapPanel Margin="0,0,0,6">
+                        <TextBlock Text="类型" Style="{StaticResource FieldLabel}"/>
+                        <ComboBox x:Name="TypeCombo" Width="100" SelectionChanged="NumOpt_Changed" Margin="0,0,12,0"/>
+                        <TextBlock Text="字节序" Style="{StaticResource FieldLabel}"/>
+                        <ComboBox x:Name="OrderCombo" Width="150" SelectionChanged="NumOpt_Changed" Margin="0,0,12,0"/>
+                        <Button Content="把字节填入上方" Style="{StaticResource SmallButton}" Click="NumToTop_Click"/>
+                    </WrapPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="70"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <TextBlock Text="数值" Style="{StaticResource FieldLabel}"/>
+                        <TextBox x:Name="NumBox" Grid.Column="1" Style="{StaticResource FieldBox}" FontFamily="{StaticResource MonoFont}" TextChanged="NumBox_TextChanged" Margin="0,2"
+                                 ToolTip="整数可写 0x 前缀（按位模式理解，如 int16 的 0xFFFF = -1）；浮点支持 NaN / inf"/>
+                        <Button Grid.Column="2" Content="复制" Style="{StaticResource SmallButton}" Tag="NumBox" Click="Copy_Click" Margin="6,2,0,2"/>
+                        <TextBlock Grid.Row="1" Text="HEX" Style="{StaticResource FieldLabel}"/>
+                        <TextBox x:Name="NumHexBox" Grid.Row="1" Grid.Column="1" Style="{StaticResource FieldBox}" FontFamily="{StaticResource MonoFont}" TextChanged="NumHexBox_TextChanged" Margin="0,2"/>
+                        <Button Grid.Row="1" Grid.Column="2" Content="复制" Style="{StaticResource SmallButton}" Tag="NumHexBox" Click="Copy_Click" Margin="6,2,0,2"/>
+                    </Grid>
+                    <TextBlock x:Name="NumError" Foreground="{DynamicResource DangerBrush}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}" Margin="0,10,0,0">
+                <StackPanel>
+                    <DockPanel Margin="0,0,0,6">
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <TextBlock Text="起始偏移" Style="{StaticResource FieldLabel}"/>
+                            <TextBox x:Name="OffsetBox" Width="60" Style="{StaticResource FieldBox}" Text="0" TextChanged="OffsetBox_TextChanged"/>
+                        </StackPanel>
+                        <TextBlock Text="按全部类型 × 4 种字节序解读上方 HEX" Style="{StaticResource CardTitle}"/>
+                    </DockPanel>
+                    <DataGrid x:Name="InterpGrid" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column" Height="290"
+                              FontFamily="{StaticResource MonoFont}" CanUserSortColumns="False" SelectionUnit="Cell">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="类型" Binding="{Binding Type}" Width="70"/>
+                            <DataGridTextColumn Header="ABCD（大端）" Binding="{Binding ABCD}" Width="*"/>
+                            <DataGridTextColumn Header="DCBA（小端）" Binding="{Binding DCBA}" Width="*"/>
+                            <DataGridTextColumn Header="BADC" Binding="{Binding BADC}" Width="*"/>
+                            <DataGridTextColumn Header="CDAB" Binding="{Binding CDAB}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <TextBlock Text="提示：选中单元格后 Ctrl+C 复制。字节数不足的类型显示为空。" Style="{StaticResource MutedText}" Margin="0,4,0,0"/>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</Window>
